@@ -389,6 +389,65 @@
     body.level23 #l5Seq .l5arrow,body.level25 #l5Seq .l5arrow{font-size:10px}
   }
 
+  /* ---------- 第二十六 ~ 三十关 ---------- */
+  body.level26 #hud2,body.level27 #hud2,body.level28 #hud2,
+  body.level29 #hud2,body.level30 #hud2{display:block}
+  body.level26 .top,body.level26 #hint,
+  body.level27 .top,body.level27 #hint,
+  body.level28 .top,body.level28 #hint,
+  body.level29 .top,body.level29 #hint,
+  body.level30 .top,body.level30 #hint{display:none}
+
+  /* 第二十六关：四个按钮（上排双手举灯，下排双脚迈步） */
+  body.level26 .pad.foot{display:flex}
+  body.level26 .pad{width:clamp(66px,13vmin,96px);height:clamp(66px,13vmin,96px);
+    font-size:clamp(13px,3vmin,18px)}
+  body.level26 #btnL{left:calc(18px + env(safe-area-inset-left));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level26 #btnR{right:calc(18px + env(safe-area-inset-right));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level26 #footL{left:calc(18px + env(safe-area-inset-left))}
+  body.level26 #footR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 第二十七关：只用脚，底部提示格子颜色 */
+  body.level27 #btnL,body.level27 #btnR{display:none}
+  body.level27 .pad.foot{display:flex;
+    width:clamp(76px,15vmin,112px);height:clamp(76px,15vmin,112px);
+    font-size:clamp(15px,3.6vmin,22px)}
+  body.level27 #footL{left:calc(18px + env(safe-area-inset-left))}
+  body.level27 #footR{right:calc(18px + env(safe-area-inset-right))}
+  body.level27 #l5Seq{display:flex}
+  @media (orientation:portrait){
+    body.level27 #l5Seq{
+      max-width:94vw;flex-wrap:nowrap;overflow-x:auto;
+      bottom:calc(18px + clamp(76px,15vmin,112px) + 28px + env(safe-area-inset-bottom));
+    }
+    body.level27 #l5Seq .l5chip{padding:4px 6px;font-size:11px}
+    body.level27 #l5Seq .l5arrow{font-size:10px}
+  }
+
+  /* 第二十八关：只用手 */
+  body.level28 .pad.foot{display:none}
+  body.level28 .pad{display:flex;width:clamp(76px,15vmin,112px);height:clamp(76px,15vmin,112px);
+    font-size:clamp(15px,3.6vmin,22px)}
+  body.level28 #btnL{left:calc(18px + env(safe-area-inset-left))}
+  body.level28 #btnR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 第二十九关：只用脚（两只脚都起跳） */
+  body.level29 #btnL,body.level29 #btnR{display:none}
+  body.level29 .pad.foot{display:flex;
+    width:clamp(76px,15vmin,112px);height:clamp(76px,15vmin,112px);
+    font-size:clamp(15px,3.6vmin,22px)}
+  body.level29 #footL{left:calc(18px + env(safe-area-inset-left))}
+  body.level29 #footR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 第三十关：只用手（压平衡） */
+  body.level30 .pad.foot{display:none}
+  body.level30 .pad{display:flex;width:clamp(76px,15vmin,112px);height:clamp(76px,15vmin,112px);
+    font-size:clamp(15px,3.6vmin,22px)}
+  body.level30 #btnL{left:calc(18px + env(safe-area-inset-left))}
+  body.level30 #btnR{right:calc(18px + env(safe-area-inset-right))}
+
   /* 第七关：蓄力条里的绿区 */
   #l7Zone{position:absolute;top:0;bottom:0;left:0;width:0;display:none;
     background:rgba(61,220,132,.55);box-shadow:0 0 10px rgba(61,220,132,.85)}
@@ -529,7 +588,7 @@
   <!-- 关卡列表 -->
   <div class="panel" id="panelLevels" hidden>
     <h1>选择关卡</h1>
-    <div class="sub">目前开放 25 关</div>
+    <div class="sub">目前开放 30 关</div>
     <div class="lvlist">
       <div class="lv" id="lv1">
         <div class="lvno">第一关</div>
@@ -728,6 +787,46 @@
         <div class="lvmeta">
           <div class="lvname">奶蛙摆毕业照</div>
           <div class="lvdesc">按摄影师的要求同时按住手脚，保持 1.25 秒，摆完 6 个姿势</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv26">
+        <div class="lvno">第二十六关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙打灯笼夜行</div>
+          <div class="lvdesc">双手按住举着灯笼，左右脚交替走过漆黑的夜路 10 步</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv27">
+        <div class="lvno">第二十七关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙跳房子</div>
+          <div class="lvdesc">黄格左脚、蓝格右脚、绿格双脚同时跳，连跳 10 格</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv28">
+        <div class="lvno">第二十八关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙敲鼓节奏</div>
+          <div class="lvdesc">光标扫到绿区时按对应的手敲鼓，左右手轮流敲准 12 拍</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv29">
+        <div class="lvno">第二十九关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙跳绳</div>
+          <div class="lvdesc">绳子落到脚边时按脚起跳，连续跳过 15 次</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv30">
+        <div class="lvno">第三十关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙走钢丝</div>
+          <div class="lvdesc">往哪边歪就按住反方向的手，在高空钢丝上撑住 12 秒</div>
         </div>
         <div class="lvgo">开始</div>
       </div>
