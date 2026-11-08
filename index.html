@@ -240,6 +240,53 @@
     body.level8 #l5Seq .l5arrow,body.level10 #l5Seq .l5arrow{font-size:10px}
   }
 
+  /* ---------- 第十一 ~ 十五关 ---------- */
+  body.level11 #hud2,body.level12 #hud2,body.level13 #hud2,
+  body.level14 #hud2,body.level15 #hud2{display:block}
+  body.level11 .top,body.level11 #hint,
+  body.level12 .top,body.level12 #hint,
+  body.level13 .top,body.level13 #hint,
+  body.level14 .top,body.level14 #hint,
+  body.level15 .top,body.level15 #hint{display:none}
+
+  /* 第十二 / 十三 / 十四关：只用脚 */
+  body.level12 #btnL,body.level12 #btnR,
+  body.level13 #btnL,body.level13 #btnR,
+  body.level14 #btnL,body.level14 #btnR{display:none}
+  body.level12 .pad.foot,body.level13 .pad.foot,body.level14 .pad.foot{display:flex;
+    width:clamp(76px,15vmin,112px);height:clamp(76px,15vmin,112px);
+    font-size:clamp(15px,3.6vmin,22px)}
+  body.level12 #footL,body.level13 #footL,body.level14 #footL{left:calc(18px + env(safe-area-inset-left))}
+  body.level12 #footR,body.level13 #footR,body.level14 #footR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 第十五关：只用手（按住左右手平衡） */
+  body.level15 .pad.foot{display:none}
+  body.level15 .pad{display:flex;width:clamp(76px,15vmin,112px);height:clamp(76px,15vmin,112px);
+    font-size:clamp(15px,3.6vmin,22px)}
+  body.level15 #btnL{left:calc(18px + env(safe-area-inset-left))}
+  body.level15 #btnR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 第十一关：四个按钮（上排手、下排脚） */
+  body.level11 .pad.foot{display:flex}
+  body.level11 .pad{width:clamp(66px,13vmin,96px);height:clamp(66px,13vmin,96px);
+    font-size:clamp(13px,3vmin,18px)}
+  body.level11 #btnL{left:calc(18px + env(safe-area-inset-left));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level11 #btnR{right:calc(18px + env(safe-area-inset-right));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level11 #footL{left:calc(18px + env(safe-area-inset-left))}
+  body.level11 #footR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 第十一关底部提示条 */
+  body.level11 #l5Seq{display:flex}
+  @media (orientation:portrait){
+    body.level11 #l5Seq{
+      max-width:94vw;flex-wrap:nowrap;overflow-x:auto;
+      bottom:calc(18px + 2 * clamp(66px,13vmin,96px) + 28px + env(safe-area-inset-bottom));
+    }
+    body.level11 #l5Seq .l5chip{padding:4px 8px;font-size:11px}
+  }
+
   /* 第七关：蓄力条里的绿区 */
   #l7Zone{position:absolute;top:0;bottom:0;left:0;width:0;display:none;
     background:rgba(61,220,132,.55);box-shadow:0 0 10px rgba(61,220,132,.85)}
@@ -380,7 +427,7 @@
   <!-- 关卡列表 -->
   <div class="panel" id="panelLevels" hidden>
     <h1>选择关卡</h1>
-    <div class="sub">目前开放 10 关</div>
+    <div class="sub">目前开放 15 关</div>
     <div class="lvlist">
       <div class="lv" id="lv1">
         <div class="lvno">第一关</div>
@@ -459,6 +506,46 @@
         <div class="lvmeta">
           <div class="lvname">奶蛙拍手跺脚</div>
           <div class="lvdesc">每一拍要同时按下两个部位，差一点点都算错，共 8 拍</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv11">
+        <div class="lvno">第十一关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙按路灯</div>
+          <div class="lvdesc">四块踏板随机亮起，灯灭前按下对应手脚，共 10 盏灯</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv12">
+        <div class="lvno">第十二关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙顶气球</div>
+          <div class="lvdesc">气球落到脚边时按脚把它顶起来，别让它落地，共 10 次</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv13">
+        <div class="lvno">第十三关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙跨栏</div>
+          <div class="lvdesc">一路小跑，栏架前按脚起跳，跨过 8 个栏架到终点</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv14">
+        <div class="lvno">第十四关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙推购物车</div>
+          <div class="lvdesc">光标进绿区时按脚推，左右脚轮流，把购物车推回超市</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv15">
+        <div class="lvno">第十五关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙走独木桥</div>
+          <div class="lvdesc">木板会慢慢歪，按住左右手把它压回来，稳稳撑住 8 秒</div>
         </div>
         <div class="lvgo">开始</div>
       </div>
