@@ -521,6 +521,48 @@
   body.level39 #btnL{left:calc(18px + env(safe-area-inset-left))}
   body.level39 #btnR{right:calc(18px + env(safe-area-inset-right))}
 
+  /* ---------- 第四十一 ~ 四十五关 ---------- */
+  body.level41 #hud2,body.level42 #hud2,body.level43 #hud2,
+  body.level44 #hud2,body.level45 #hud2{display:block}
+  body.level41 .top,body.level41 #hint,
+  body.level42 .top,body.level42 #hint,
+  body.level43 .top,body.level43 #hint,
+  body.level44 .top,body.level44 #hint,
+  body.level45 .top,body.level45 #hint{display:none}
+
+  /* 41 / 44：只用脚 */
+  body.level41 #btnL,body.level41 #btnR,
+  body.level44 #btnL,body.level44 #btnR{display:none}
+  body.level41 .pad.foot,body.level44 .pad.foot{display:flex;
+    width:clamp(76px,15vmin,112px);height:clamp(76px,15vmin,112px);
+    font-size:clamp(15px,3.6vmin,22px)}
+  body.level41 #footL,body.level44 #footL{left:calc(18px + env(safe-area-inset-left))}
+  body.level41 #footR,body.level44 #footR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 42：左手 + 双脚，右手不需要 */
+  body.level42 #btnR{display:none}
+  body.level42 .pad.foot{display:flex}
+  body.level42 .pad{width:clamp(66px,13vmin,96px);height:clamp(66px,13vmin,96px);
+    font-size:clamp(13px,3vmin,18px)}
+  body.level42 #btnL{left:calc(18px + env(safe-area-inset-left));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level42 #footL{left:calc(18px + env(safe-area-inset-left))}
+  body.level42 #footR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 43 / 45：四个按钮（上排双手，下排双脚） */
+  body.level43 .pad.foot,body.level45 .pad.foot{display:flex}
+  body.level43 .pad,body.level45 .pad{
+    width:clamp(66px,13vmin,96px);height:clamp(66px,13vmin,96px);
+    font-size:clamp(13px,3vmin,18px)}
+  body.level43 #btnL,body.level45 #btnL{
+    left:calc(18px + env(safe-area-inset-left));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level43 #btnR,body.level45 #btnR{
+    right:calc(18px + env(safe-area-inset-right));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level43 #footL,body.level45 #footL{left:calc(18px + env(safe-area-inset-left))}
+  body.level43 #footR,body.level45 #footR{right:calc(18px + env(safe-area-inset-right))}
+
   /* 第七关：蓄力条里的绿区 */
   #l7Zone{position:absolute;top:0;bottom:0;left:0;width:0;display:none;
     background:rgba(61,220,132,.55);box-shadow:0 0 10px rgba(61,220,132,.85)}
@@ -661,7 +703,7 @@
   <!-- 关卡列表 -->
   <div class="panel" id="panelLevels" hidden>
     <h1>选择关卡</h1>
-    <div class="sub">目前开放 40 关</div>
+    <div class="sub">目前开放 45 关</div>
     <div class="lvlist">
       <div class="lv" id="lv1">
         <div class="lvno">第一关</div>
@@ -980,6 +1022,46 @@
         <div class="lvmeta">
           <div class="lvname">奶蛙毕业典礼</div>
           <div class="lvdesc">16 个限时指令越来越快，全部完成后放礼花庆祝</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv41">
+        <div class="lvno">第四十一关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙荡秋千</div>
+          <div class="lvdesc">秋千荡到最低点时按脚加力，一次比一次荡得高，成功 8 次</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv42">
+        <div class="lvno">第四十二关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙顶杯子</div>
+          <div class="lvdesc">左手一直按住顶稳杯子，左右脚交替往前走 10 步，松手就重来</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv43">
+        <div class="lvno">第四十三关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙闪灯记忆</div>
+          <div class="lvdesc">灯会闪出颜色对应的部位，灯灭后按对，共 16 下越来越快</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv44">
+        <div class="lvno">第四十四关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙搬砖</div>
+          <div class="lvdesc">每张单子按 1~3 次脚，左右脚交替，八单送完整面砖墙</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv45">
+        <div class="lvno">第四十五关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙接力赛</div>
+          <div class="lvdesc">四棒接力：双手按住、交替走、交替拍手、双脚齐跳</div>
         </div>
         <div class="lvgo">开始</div>
       </div>
