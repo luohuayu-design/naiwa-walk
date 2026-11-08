@@ -28,6 +28,17 @@ const CONFIG = {
     // 攀爬路线：地面 → 三级台阶顶 → 车门口，共 4 步
     points: [[6.3, 0], [7.55, 0.46], [8.05, 0.92], [8.55, 1.38], [9.05, 1.44]],
   },
+  // 第三关：下车（手脚对角配合：松一只手 → 踩同侧的脚，撑住的手正好在对角）
+  lvl3 : {
+    time: 30, missPenalty: 3,
+    settle: 0.25,          // 双手扶稳这么久，才提示可以松手
+    releaseWindow: 0.60,   // 松手后必须在这么久内踩下台阶，否则撑不住
+    stepT: 0.34,           // 下一级台阶的动画时长
+    busX: 12.3,
+    grabX: 9.30,           // 门框边上的抓手位置
+    // 下车路线：车门踏面 → 三级台阶 → 地面，共 4 步
+    points: [[9.05, 1.44], [8.55, 1.38], [8.05, 0.92], [7.55, 0.46], [6.60, 0]],
+  },
 };
 const BEAT_MS = 60000 / CONFIG.beat.bpm;
 
@@ -334,6 +345,7 @@ const el = {
   homeBtn  : document.getElementById('homeBtn'),
   lv1      : document.getElementById('lv1'),
   lv2      : document.getElementById('lv2'),
+  lv3      : document.getElementById('lv3'),
   l2Time   : document.getElementById('l2Time'),
   l2Miss   : document.getElementById('l2Miss'),
   l2TimeChip: document.getElementById('l2TimeChip'),
@@ -343,6 +355,8 @@ const el = {
   l2ProgFill: document.getElementById('l2ProgFill'),
   btnL     : document.getElementById('btnL'),
   btnR     : document.getElementById('btnR'),
+  footL    : document.getElementById('footL'),
+  footR    : document.getElementById('footR'),
   backHomeBtn: document.getElementById('backHomeBtn'),
   ovHomeBtn: document.getElementById('ovHomeBtn'),
   homeChip : document.getElementById('homeChip'),
@@ -757,7 +771,11 @@ function startLevel2(){
     }
   }
   G.camX = 9.9; G.camZ = CONFIG.cam.z;
+  document.body.classList.remove('level3');
   document.body.classList.add('level2');
+  if(L3.props) L3.props.visible = false;
+  if(el.btnL){ el.btnL.classList.remove('drop'); el.btnL.classList.remove('want'); }
+  if(el.btnR){ el.btnR.classList.remove('drop'); el.btnR.classList.remove('want'); }
   if(el.btnL) el.btnL.innerHTML = '<span>←</span>左手';
   if(el.btnR) el.btnR.innerHTML = '<span>→</span>右手';
   updateL2Progress();
@@ -768,16 +786,23 @@ function startLevel2(){
 
 function setLevel1Scene(){
   document.body.classList.remove('level2');
+  document.body.classList.remove('level3');
   L2.active = false; L2.done = false;
+  L3.active = false; L3.done = false;
   if(L2.props) L2.props.visible = false;
+  if(L3.props) L3.props.visible = false;
   if(el.btnL){
     el.btnL.innerHTML = '<span>←</span>左脚';
     el.btnL.classList.remove('want');
+    el.btnL.classList.remove('drop');
   }
   if(el.btnR){
     el.btnR.innerHTML = '<span>→</span>右脚';
     el.btnR.classList.remove('want');
+    el.btnR.classList.remove('drop');
   }
+  if(el.footL) el.footL.classList.remove('want');
+  if(el.footR) el.footR.classList.remove('want');
   if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
   ring.visible = true;
   for(const p of pads) p.visible = true;
@@ -1043,11 +1068,451 @@ function updateLevel2(dt, now){
 }
 
 // ============================================================
+// 第三关：奶蛙下车（手脚对角）
+//
+// 下车时一只脚离开台阶的瞬间全靠一只手撑着，所以四根手指都要用上：
+//   1) 双手同时扶住门框 → 站稳；
+//   2) 松开一只手，靠另一只手撑住；
+//   3) 0.6 秒内踩下与松开的手同侧的脚 ——「撑着的手」和「踩下去的脚」正好在身体对角；
+//   4) 下一级必须换另一只手撑住，左右交替。
+//   两只手同时松 / 踩错脚 / 松手太久 → 摔，扣 3 秒；4 步踩到地面 = 下车成功。
+// ============================================================
+const L3 = {
+  active: false, done: false, phase: 'ready', phaseT: 0,
+  timeLeft: 0, misses: 0,
+  fx: 0, fy: 0,
+  fromX: 0, fromY: 0, toX: 0, toY: 0, stepT: 0, step: 0, stepFoot: null,
+  down: { L: false, R: false },
+  releaseSide: null, releaseT: 0,       // 当前松开的那只手 / 已松开多久
+  settleT: 0,                           // 双手扶住的累计时间
+  lastSupport: null,                    // 上一步是哪只手撑住的（下一步必须换边）
+  noteT: 0,                             // 临时提示剩余显示时间
+  missAngle: 0.9,
+  props: null,
+  hudCache: '', taskCache: '',
+};
+window.__l3 = L3;   // 方便调试
+
+function buildL3Props(){
+  if(L3.props) return L3.props;
+  const g = new THREE.Group();
+  const C = CONFIG.lvl3;
+  const y = C.points[0][1];    // 车门踏面高度
+  // 门框边上的抓手：两根立杆 + 一根横杆
+  addBox(0.07, 1.22, 0.07, 0xd9a441, C.grabX, y + 0.61, 0.62, g);
+  addBox(0.07, 1.22, 0.07, 0xd9a441, C.grabX, y + 0.61, -0.62, g);
+  addBox(0.07, 0.07, 1.31, 0xd9a441, C.grabX, y + 1.22, 0, g);
+  // 地面箭头：指向下车方向（画面左边）
+  const arr = new THREE.Mesh(
+    new THREE.ConeGeometry(0.28, 0.62, 3),
+    new THREE.MeshLambertMaterial({ color: 0x3ddc84 })
+  );
+  arr.rotation.z = Math.PI / 2;
+  arr.position.set(6.1, 0.045, 0.35);
+  g.add(arr);
+
+  g.visible = false;
+  scene.add(g);
+  L3.props = g;
+  return g;
+}
+
+// 该松哪只手：上一级是左手撑住，这一级就得让右手撑住 → 松左手
+function l3NextReleaseHand(){
+  return L3.lastSupport || null;         // 第一级：左右都行
+}
+
+function l3TaskText(){
+  const C = CONFIG.lvl3;
+  if(L3.phase === 'ready') return '双手同时按住门框上的抓手，站稳';
+  if(L3.phase === 'step') return '下！';
+  if(L3.phase === 'both'){
+    if(!L3.down.L || !L3.down.R) return '把「' + (L3.down.L ? '右手' : '左手') + '」扶回抓手';
+    if(L3.settleT < C.settle) return '扶稳了…';
+    const rel = l3NextReleaseHand();
+    if(rel === 'L') return '松开「左手」，靠右手撑住，再踩左脚（对角）';
+    if(rel === 'R') return '松开「右手」，靠左手撑住，再踩右脚（对角）';
+    return '松开任意一只手，靠另一只手撑住';
+  }
+  if(L3.phase === 'one'){
+    const f = L3.releaseSide === 'L' ? '左脚' : '右脚';
+    const s = L3.releaseSide === 'L' ? '右手' : '左手';
+    return '踩「' + f + '」下台阶（' + s + '撑住 · 对角配合）';
+  }
+  if(L3.phase === 'win') return '🎉 下车成功';
+  return null;      // miss 的文案由 l3Miss 单独写
+}
+
+function l3SetTask(txt){
+  if(!txt || !el.l2Task) return;
+  if(L3.taskCache === txt) return;
+  L3.taskCache = txt;
+  el.l2Task.textContent = txt;
+}
+
+// 提示：ready 时双手高亮；该松手时那只手红闪；one 时该踩的脚绿闪
+function l3HintRelease(){
+  if(!L3.active || L3.done || L3.phase !== 'both') return null;
+  if(!L3.down.L || !L3.down.R) return null;
+  if(L3.settleT < CONFIG.lvl3.settle) return null;
+  return L3.lastSupport || 'both';
+}
+
+function l3ApplyHint(){
+  const rel = l3HintRelease();
+  if(el.btnL) el.btnL.classList.toggle('drop', rel === 'L' || rel === 'both');
+  if(el.btnR) el.btnR.classList.toggle('drop', rel === 'R' || rel === 'both');
+  const wantHand = (L3.active && !L3.done && L3.phase === 'ready');
+  if(el.btnL) el.btnL.classList.toggle('want', wantHand);
+  if(el.btnR) el.btnR.classList.toggle('want', wantHand);
+  const foot = (L3.active && !L3.done && L3.phase === 'one') ? L3.releaseSide : null;
+  if(el.footL) el.footL.classList.toggle('want', foot === 'L');
+  if(el.footR) el.footR.classList.toggle('want', foot === 'R');
+}
+
+function setL3Phase(p){
+  L3.phase = p;
+  L3.phaseT = 0;
+  const showBar = (p === 'ready' || p === 'both' || p === 'one' || p === 'step');
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.toggle('on', showBar);
+  if(p !== 'miss') l3SetTask(l3TaskText());
+  l3ApplyHint();
+}
+
+function updateL3Progress(){
+  const total = CONFIG.lvl3.points.length - 1;
+  if(el.l2ProgFill) el.l2ProgFill.style.width = (L3.step / total * 100).toFixed(1) + '%';
+  if(el.l2Step) el.l2Step.textContent = L3.step + '/' + total;
+}
+
+function startLevel3(){
+  const C = CONFIG.lvl3;
+  L3.active = true; L3.done = false;
+  L3.timeLeft = C.time; L3.misses = 0;
+  L3.step = 0; L3.stepT = 0; L3.stepFoot = null;
+  L3.fx = C.points[0][0]; L3.fy = C.points[0][1];
+  L3.down.L = L3.down.R = false;
+  L3.releaseSide = null; L3.releaseT = 0;
+  L3.settleT = 0; L3.lastSupport = null; L3.noteT = 0;
+  L3.hudCache = ''; L3.taskCache = '';
+
+  ring.visible = false;
+  for(const p of pads) p.visible = false;
+  buildL2Props().visible = true;      // 下车走的还是那三级台阶和车门
+  buildL3Props().visible = true;
+
+  if(bus) bus.root.position.x = C.busX;
+  if(frog){
+    frog.root.position.set(L3.fx, L3.fy, 0);
+    frog.root.rotation.y = CONFIG.frog.yaw;
+    frog.body.rotation.set(0, 0, 0);
+    frog.body.position.set(0, 0, 0);
+    for(const k in frog.parts){
+      const p = frog.parts[k];
+      p.pose.x = p.pose.y = p.pose.z = 0;
+    }
+  }
+  G.camX = 8.8; G.camZ = CONFIG.cam.z;
+  document.body.classList.remove('level2');
+  document.body.classList.add('level3');
+  if(el.btnL) el.btnL.innerHTML = '<span>←</span>左手';
+  if(el.btnR) el.btnR.innerHTML = '<span>→</span>右手';
+  if(el.footL) el.footL.innerHTML = '<span>↓</span>左脚';
+  if(el.footR) el.footR.innerHTML = '<span>↓</span>右脚';
+  updateL3Progress();
+  setL3Phase('ready');
+  updateL3HUD();
+  Sfx.init();
+}
+
+// ---- 手：按住 = 扶住，松开 = 准备踩台阶 ----
+function l3HandDown(side){
+  if(G.level !== 3 || !L3.active || L3.done) return;
+  if(L3.phase === 'miss' || L3.phase === 'win') return;
+  L3.down[side] = true;
+
+  if(L3.phase === 'step'){                 // 下落动画中只记录手的状态
+    if(L3.releaseSide === side){ L3.releaseSide = null; L3.releaseT = 0; }
+    return;
+  }
+  if(L3.phase === 'ready'){
+    if(L3.down.L && L3.down.R){
+      L3.settleT = 0;
+      setL3Phase('both');
+    }
+    return;
+  }
+  if(L3.phase === 'one' && L3.releaseSide === side){
+    // 松开的这只手又扶回来了 → 回到双手扶稳，重新开始
+    L3.releaseSide = null; L3.releaseT = 0; L3.settleT = 0;
+    setL3Phase('both');
+    return;
+  }
+  if(L3.phase === 'both' && L3.releaseSide === side){
+    L3.releaseSide = null; L3.releaseT = 0;
+    l3ApplyHint();
+  }
+}
+
+function l3HandUp(side){
+  if(G.level !== 3 || !L3.active || L3.done) return;
+  L3.down[side] = false;
+  if(L3.phase === 'step') return;          // 下落过程中松手不打断这一级
+  if(L3.phase === 'one'){
+    if(!L3.down.L && !L3.down.R) l3Miss('两只手都松开了，身体失去支撑');
+    return;
+  }
+  if(L3.phase !== 'both') return;
+  if(!L3.down.L && !L3.down.R){
+    l3Miss('两只手同时松开，身体失去支撑');
+    return;
+  }
+  L3.releaseSide = side;
+  L3.releaseT = 0;
+  L3.settleT = 0;
+  setL3Phase('one');
+}
+
+// ---- 脚：踩一下 = 下一级台阶 ----
+function l3FootTap(side){
+  if(G.level !== 3 || !L3.active || L3.done) return;
+  if(L3.phase === 'miss' || L3.phase === 'win' || L3.phase === 'step') return;
+
+  if(L3.phase === 'ready' || L3.phase === 'both'){
+    L3.noteT = 1.0;
+    l3SetTask('先松开一只手，靠另一只手撑住，脚才踩得下去');
+    return;
+  }
+  // one：撑着的手和这只脚必须在对角
+  const support = L3.releaseSide === 'L' ? 'R' : 'L';
+  if(side !== L3.releaseSide){
+    l3Miss('踩错脚了，撑住的手和脚要在一个对角线上');
+    return;
+  }
+  if(L3.lastSupport === support){
+    L3.noteT = 1.0;
+    L3.releaseT = 0;                       // 给回换手的时间
+    l3SetTask('换另一只手撑住，两级台阶要换边');
+    return;
+  }
+  l3StepDown();
+}
+
+function l3StepDown(){
+  const C = CONFIG.lvl3;
+  const P = C.points;
+  const foot = L3.releaseSide;
+  L3.lastSupport = (foot === 'L') ? 'R' : 'L';   // 撑住的是对侧那只手
+  L3.stepFoot = foot;
+  L3.step = Math.min(L3.step + 1, P.length - 1);
+  L3.fromX = L3.fx; L3.fromY = L3.fy;
+  L3.toX = P[L3.step][0]; L3.toY = P[L3.step][1];
+  L3.stepT = 0;
+  L3.settleT = 0;
+  L3.noteT = 0;
+  Sfx.step();
+  setL3Phase('step');
+  updateL3Progress();
+}
+
+function l3Miss(reason){
+  if(!L3.active || L3.done || L3.phase === 'miss') return;
+  const C = CONFIG.lvl3;
+  L3.misses++;
+  L3.timeLeft = Math.max(0, L3.timeLeft - C.missPenalty);
+  L3.missAngle = L3.fy > 0.5 ? -0.9 : 0.9;
+  L3.releaseSide = null; L3.releaseT = 0;
+  L3.settleT = 0;
+  Sfx.thud();
+  setL3Phase('miss');
+  l3SetTask('失误：' + reason + '（-' + C.missPenalty + ' 秒）');
+  updateL3HUD();
+  if(L3.timeLeft <= 0) setTimeout(l3Lose, 700);
+}
+
+function l3Respawn(){
+  const C = CONFIG.lvl3;
+  const p = C.points[Math.min(L3.step, C.points.length - 1)];
+  L3.fx = p[0]; L3.fy = p[1];
+  L3.releaseSide = null; L3.releaseT = 0;
+  L3.settleT = 0; L3.lastSupport = null;
+  if(L3.down.L && L3.down.R) setL3Phase('both');
+  else setL3Phase('ready');
+}
+
+function l3Win(){
+  if(L3.done) return;
+  const C = CONFIG.lvl3;
+  L3.done = true; L3.active = false;
+  const used = Math.max(0, C.time - L3.timeLeft).toFixed(1);
+  setL3Phase('win');
+  l3ApplyHint();
+  updateL3HUD();
+  setTimeout(()=>{
+    showOverlay('🚪 下车成功！',
+      '用时 ' + used + ' 秒 · 失误 ' + L3.misses + ' 次', '再玩一次');
+  }, 1300);
+}
+
+function l3Lose(){
+  if(L3.done) return;
+  L3.done = true; L3.active = false;
+  setL3Phase('miss');
+  l3ApplyHint();
+  l3SetTask('时间到，车门关上了');
+  showOverlay('时间到…', '车门关上了，奶蛙还卡在台阶上', '再试一次');
+}
+
+// 第三关的姿势：一只手撑住，另一只手松开 + 同侧脚往下探
+function l3Pose(dt, now){
+  const t = now * 0.001;
+  TGT = {};
+  for(const k of BONES) TGT[k] = { x: 0, y: 0, z: 0 };
+  BTGT = { rz: 0, ry: 0, y: 0 };
+  const br = Math.sin(t * 2.1);
+  TGT.spine.x = br * 0.02;
+  TGT.head.x = br * 0.035;
+
+  const rel = L3.releaseSide;
+  const sup = rel ? (rel === 'L' ? 'R' : 'L') : null;
+
+  if(L3.phase === 'ready'){
+    TGT.armL.z = 0.55 + br * 0.04;
+    TGT.armR.z = -0.55 - br * 0.04;
+    TGT.legL.z = 0.06;
+    TGT.legR.z = -0.06;
+  }else if(L3.phase === 'both'){
+    // 双手扶住抓手
+    TGT.armL.z = L3.down.L ? 1.26 : 0.45;
+    TGT.armR.z = L3.down.R ? -1.26 : -0.45;
+    TGT.spine.x = -0.04;
+    TGT.legL.z = 0.06;
+    TGT.legR.z = -0.06;
+    BTGT.y = br * 0.008;
+  }else if(L3.phase === 'one'){
+    // 撑着的手抓紧；松开的手下垂，同侧的腿抬起来准备踩
+    TGT.armL.z = (sup === 'L') ? 1.30 : 0.18;
+    TGT.armR.z = (sup === 'R') ? -1.30 : -0.18;
+    TGT.spine.x = -0.02;
+    const lift = (rel === 'L') ? 1 : -1;
+    TGT.legL.z = 0.08 + (lift > 0 ? 0.40 : 0);
+    TGT.legR.z = -0.08 - (lift < 0 ? 0.40 : 0);
+    BTGT.rz = -lift * 0.08;
+    BTGT.y = br * 0.01;
+  }else if(L3.phase === 'step'){
+    // 撑住的手一直不放，踩下去的腿伸直往下探
+    const k = Math.min(1, L3.stepT / CONFIG.lvl3.stepT);
+    const s = Math.sin(Math.PI * k);
+    TGT.armL.z = (L3.lastSupport === 'L') ? 1.30 : 0.25 * s;
+    TGT.armR.z = (L3.lastSupport === 'R') ? -1.30 : -0.25 * s;
+    TGT.legL.z = (L3.stepFoot === 'L') ? 0.26 * s : -0.10 * s;
+    TGT.legR.z = (L3.stepFoot === 'R') ? -0.26 * s : 0.10 * s;
+    TGT.spine.x = 0.06 * s;
+    BTGT.y = -0.02 * s;
+  }else if(L3.phase === 'miss'){
+    const k = Math.min(1, L3.phaseT / 0.45);
+    BTGT.rz = L3.missAngle * k;
+    BTGT.y = -0.06 * k;
+    TGT.armL.z = 0.55 * k;
+    TGT.armR.z = -0.55 * k;
+    TGT.legL.z = 0.25 * k;
+    TGT.legR.z = -0.20 * k;
+  }else if(L3.phase === 'win'){
+    const hop = Math.abs(Math.sin(t * 5.2));
+    BTGT.y = hop * 0.20;
+    TGT.armL.z = 1.35 + hop * 0.2;
+    TGT.armR.z = -1.35 - hop * 0.2;
+    TGT.head.x = -0.15;
+  }
+  applyPose(dt);
+}
+
+function l3Camera(dt){
+  const portrait = camera.aspect < 1.15;
+  let wantX = THREE.MathUtils.clamp(L3.fx + 0.9, 7.3, 9.5);
+  let wantZ = CONFIG.cam.z;
+  if(portrait){
+    const halfNeed = 4.2;
+    const hFov = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(CONFIG.cam.fov) * 0.5) * camera.aspect);
+    wantZ = THREE.MathUtils.clamp(halfNeed / Math.tan(hFov * 0.5), CONFIG.cam.z, 34);
+    wantX = THREE.MathUtils.clamp(L3.fx + 0.5, 7.1, 9.3);
+  }
+  G.camX += (wantX - G.camX) * (1 - Math.exp(-dt * 3));
+  G.camZ += (wantZ - G.camZ) * (1 - Math.exp(-dt * 3));
+  camera.position.x = G.camX;
+  camera.position.y = CONFIG.cam.y + L3.fy * 0.40;
+  camera.position.z = G.camZ;
+  camera.lookAt(G.camX, 1.5 + L3.fy * 0.40, 0);
+  scene.fog.near = Math.max(26, camera.position.z + 6);
+  scene.fog.far = scene.fog.near + 54;
+}
+
+function updateL3HUD(){
+  const key = L3.timeLeft.toFixed(1) + '/' + L3.misses + '/' + L3.step;
+  if(key === L3.hudCache) return;
+  L3.hudCache = key;
+  el.l2Time.textContent = L3.timeLeft.toFixed(1);
+  el.l2Miss.textContent = L3.misses;
+  el.l2TimeChip.classList.toggle('low', L3.timeLeft <= 8);
+  updateL3Progress();
+}
+
+function updateLevel3(dt, now){
+  L3.phaseT += dt;
+
+  if(L3.active && !L3.done){
+    L3.timeLeft -= dt;
+    if(L3.timeLeft <= 0){
+      L3.timeLeft = 0;
+      l3Lose();
+    }
+  }
+  if(L3.noteT > 0) L3.noteT -= dt;
+
+  if(L3.phase === 'both'){
+    if(L3.down.L && L3.down.R) L3.settleT += dt;
+  }else if(L3.phase === 'one'){
+    L3.releaseT += dt;
+    if(L3.releaseT > CONFIG.lvl3.releaseWindow){
+      l3Miss('松手太久，一只手撑不住');
+    }
+  }else if(L3.phase === 'step'){
+    L3.stepT += dt;
+    const k = Math.min(1, L3.stepT / CONFIG.lvl3.stepT);
+    L3.fx = L3.fromX + (L3.toX - L3.fromX) * easeInOutCubic(k);
+    L3.fy = L3.fromY + (L3.toY - L3.fromY) * easeInOutCubic(k) + Math.sin(Math.PI * k) * 0.10;
+    if(k >= 1){
+      L3.fx = L3.toX;
+      L3.fy = L3.toY;
+      if(L3.step >= CONFIG.lvl3.points.length - 1) l3Win();
+      else if(!L3.down.L && !L3.down.R) l3Miss('落地时两只手都没扶住');
+      else setL3Phase('both');
+    }
+  }else if(L3.phase === 'miss'){
+    if(L3.phaseT >= 0.9) l3Respawn();
+  }
+
+  if(L3.noteT <= 0 && (L3.phase === 'both' || L3.phase === 'ready')) l3SetTask(l3TaskText());
+
+  if(frog){
+    frog.root.position.x = L3.fx;
+    frog.root.position.y = L3.fy;
+    l3Pose(dt, now);
+  }
+  if(bus) bus.root.position.y = 0.012 * Math.sin(now * 0.008);
+
+  l3ApplyHint();
+  l3Camera(dt);
+  updateL3HUD();
+}
+
+// ============================================================
 // 每帧更新
 // ============================================================
 let lastT = performance.now();
 
 function update(dt, now){
+  if(G.level === 3){ updateLevel3(dt, now); return; }
   if(G.level === 2){ updateLevel2(dt, now); return; }
   // ---- 节拍器 ----
   if(G.started && !G.over){
@@ -1210,6 +1675,14 @@ function frame(){
 addEventListener('keydown', e=>{
   if(e.repeat) return;
   const k = e.key.toLowerCase();
+  if(G.level === 3){
+    // A / D 按住左右手，← / → 踩左右脚
+    if(k === 'a'){ e.preventDefault(); l3HandDown('L'); }
+    else if(k === 'd'){ e.preventDefault(); l3HandDown('R'); }
+    else if(k === 'arrowleft'){ e.preventDefault(); l3FootTap('L'); }
+    else if(k === 'arrowright'){ e.preventDefault(); l3FootTap('R'); }
+    return;
+  }
   if(G.level === 2){
     if(k === 'arrowleft' || k === 'a'){ e.preventDefault(); l2PadDown('L'); }
     else if(k === 'arrowright' || k === 'd'){ e.preventDefault(); l2PadDown('R'); }
@@ -1222,8 +1695,13 @@ addEventListener('keydown', e=>{
 });
 
 addEventListener('keyup', e=>{
-  if(G.level !== 2) return;
   const k = e.key.toLowerCase();
+  if(G.level === 3){
+    if(k === 'a') l3HandUp('L');
+    else if(k === 'd') l3HandUp('R');
+    return;
+  }
+  if(G.level !== 2) return;
   if(k === 'arrowleft' || k === 'a') l2PadUp('L');
   else if(k === 'arrowright' || k === 'd') l2PadUp('R');
 });
@@ -1232,11 +1710,28 @@ for(const [id, side] of [['btnL', 'L'], ['btnR', 'R']]){
   const node = document.getElementById(id);
   node.addEventListener('pointerdown', e=>{
     e.preventDefault();
-    if(G.level === 2) l2PadDown(side);
+    if(G.level === 3) l3HandDown(side);
+    else if(G.level === 2) l2PadDown(side);
     else pressFoot(side);
   }, { passive: false });   // 只监听 pointer 事件，避免触摸时重复触发
-  node.addEventListener('pointerup', ()=>{ if(G.level === 2) l2PadUp(side); });
-  node.addEventListener('pointercancel', ()=>{ if(G.level === 2) l2PadUp(side); });
+  node.addEventListener('pointerup', ()=>{
+    if(G.level === 3) l3HandUp(side);
+    else if(G.level === 2) l2PadUp(side);
+  });
+  node.addEventListener('pointercancel', ()=>{
+    if(G.level === 3) l3HandUp(side);
+    else if(G.level === 2) l2PadUp(side);
+  });
+  node.addEventListener('contextmenu', e=>e.preventDefault());
+}
+
+// 第三关的两个脚按钮：点一下 = 踩下一级台阶
+for(const [id, side] of [['footL', 'L'], ['footR', 'R']]){
+  const node = document.getElementById(id);
+  node.addEventListener('pointerdown', e=>{
+    e.preventDefault();
+    if(G.level === 3) l3FootTap(side);
+  }, { passive: false });
   node.addEventListener('contextmenu', e=>e.preventDefault());
 }
 
@@ -1245,17 +1740,19 @@ el.homeBtn.addEventListener('click', ()=>showLevels());
 el.backHomeBtn.addEventListener('click', ()=>showHome());
 el.lv1.addEventListener('click', ()=>startGame(1));
 el.lv2.addEventListener('click', ()=>startGame(2));
+el.lv3.addEventListener('click', ()=>startGame(3));
 el.ovBtn.addEventListener('click', ()=>startGame(G.level || 1));
 el.ovHomeBtn.addEventListener('click', ()=>showHome());
 el.homeChip.addEventListener('click', ()=>showHome());
 
 function startGame(level){
   if(!G.ready) return;      // 素材还没加载完
-  G.level = (level === 2) ? 2 : 1;
+  G.level = (level === 3) ? 3 : ((level === 2) ? 2 : 1);
   G.screen = 'game';
   el.overlay.classList.remove('show');
   document.body.classList.add('ingame');
-  if(G.level === 2) startLevel2();
+  if(G.level === 3) startLevel3();
+  else if(G.level === 2) startLevel2();
   else { setLevel1Scene(); resetGame(); }
 }
 

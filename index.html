@@ -70,10 +70,10 @@
     cursor:pointer;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
   #homeChip:active{transform:translateX(-50%) scale(.94)}
 
-  /* ---------- 第二关 HUD ---------- */
+  /* ---------- 第二 / 第三关 HUD ---------- */
   #hud2{display:none}
-  body.level2 #hud2{display:block}
-  body.level2 .top,body.level2 #hint{display:none}
+  body.level2 #hud2,body.level3 #hud2{display:block}
+  body.level2 .top,body.level2 #hint,body.level3 .top,body.level3 #hint{display:none}
   .l2bar{position:absolute;left:50%;transform:translateX(-50%);
     top:calc(52px + env(safe-area-inset-top));display:flex;gap:8px}
   .l2chip{display:flex;align-items:baseline;gap:4px;color:#fff;font-size:11px;font-weight:700;
@@ -100,6 +100,30 @@
   @keyframes wantPulse{
     0%,100%{box-shadow:0 8px 0 #c1900f,0 0 0 0 rgba(255,225,90,.7)}
     50%{box-shadow:0 8px 0 #c1900f,0 0 0 15px rgba(255,225,90,0)}}
+  /* 该松手的那只：红闪 */
+  .pad.drop{animation:dropPulse .625s ease-in-out infinite}
+  @keyframes dropPulse{
+    0%,100%{box-shadow:0 8px 0 #c1900f,0 0 0 0 rgba(255,110,110,.75)}
+    50%{box-shadow:0 8px 0 #c1900f,0 0 0 15px rgba(255,110,110,0)}}
+
+  /* ---------- 第三关：四个按钮（上排手、下排脚） ---------- */
+  .pad.foot{display:none;
+    background:radial-gradient(circle at 35% 28%,#d8ffe6,#3ddc84 62%,#1fa864);
+    color:#0f3d26;box-shadow:0 8px 0 #148a52,0 12px 24px rgba(0,20,50,.32)}
+  .pad.foot:active{box-shadow:0 2px 0 #148a52,0 6px 14px rgba(0,20,50,.3)}
+  .pad.foot.want{animation:footPulse .625s ease-in-out infinite}
+  @keyframes footPulse{
+    0%,100%{box-shadow:0 8px 0 #148a52,0 0 0 0 rgba(150,255,195,.8)}
+    50%{box-shadow:0 8px 0 #148a52,0 0 0 15px rgba(150,255,195,0)}}
+  body.level3 .pad.foot{display:flex}
+  body.level3 .pad{width:clamp(66px,13vmin,96px);height:clamp(66px,13vmin,96px);
+    font-size:clamp(13px,3vmin,18px)}
+  body.level3 #btnL{left:calc(18px + env(safe-area-inset-left));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level3 #btnR{right:calc(18px + env(safe-area-inset-right));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level3 #footL{left:calc(18px + env(safe-area-inset-left))}
+  body.level3 #footR{right:calc(18px + env(safe-area-inset-right))}
 
   /* ---------- 遮罩 ---------- */
   .overlay{position:fixed;inset:0;z-index:20;display:none;
@@ -189,6 +213,8 @@
   </div>
   <div class="pad" id="btnL"><span>←</span>左脚</div>
   <div class="pad" id="btnR"><span>→</span>右脚</div>
+  <div class="pad foot" id="footL"><span>↓</span>左脚</div>
+  <div class="pad foot" id="footR"><span>↓</span>右脚</div>
 </div>
 
 <div id="rotTip">横屏体验更佳</div>
@@ -207,7 +233,7 @@
   <!-- 关卡列表 -->
   <div class="panel" id="panelLevels" hidden>
     <h1>选择关卡</h1>
-    <div class="sub">目前开放 2 关</div>
+    <div class="sub">目前开放 3 关</div>
     <div class="lvlist">
       <div class="lv" id="lv1">
         <div class="lvno">第一关</div>
@@ -225,13 +251,13 @@
         </div>
         <div class="lvgo">开始</div>
       </div>
-      <div class="lv locked">
+      <div class="lv" id="lv3">
         <div class="lvno">第三关</div>
         <div class="lvmeta">
-          <div class="lvname">敬请期待</div>
-          <div class="lvdesc">还在教奶蛙新动作</div>
+          <div class="lvname">奶蛙下车</div>
+          <div class="lvdesc">双手扶住抓手，松一只手撑住、踩同侧的脚，对角配合下台阶</div>
         </div>
-        <div class="lvgo">🔒</div>
+        <div class="lvgo">开始</div>
       </div>
     </div>
     <button class="btn ghost" id="backHomeBtn">返回</button>
