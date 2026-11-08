@@ -54,6 +54,26 @@ const CONFIG = {
     gripGrace: 0.55,       // 松开伞最多能空这么久
     missHold: 1.0,         // 摔倒后原地起身的时长
   },
+  // 第五关：跳房子（雨后的粉笔格子：每一格一套动作序列，按对才跳得过去）
+  lvl5 : {
+    startX: 1.40, gap: 1.05, steps: 8,
+    jumpT: 0.34, jumpH: 0.52,
+    camY: 4.15, camZ: 9.35,   // 比其它关稍微俯一点，地上的格子才看得清
+    missHold: 0.85,        // 按错之后原地摇晃、序列重置的时长
+    busX: 15.5,            // 公交车停在远处的路边
+    // 每格的动作序列：HL 左手 / HR 右手 / FL 左脚 / FR 右脚
+    // 长度逐格变长：2、2、3、3、3、4、4、4
+    seqs: [
+      ['HL', 'FR'],
+      ['FR', 'HL'],
+      ['HL', 'FR', 'HL'],
+      ['FR', 'HL', 'FR'],
+      ['HL', 'HR', 'FL'],
+      ['FR', 'HL', 'HR', 'FL'],
+      ['FL', 'FR', 'HL', 'HR'],
+      ['HL', 'FR', 'HR', 'FL'],
+    ],
+  },
 };
 const BEAT_MS = 60000 / CONFIG.beat.bpm;
 
@@ -362,6 +382,8 @@ const el = {
   lv2      : document.getElementById('lv2'),
   lv3      : document.getElementById('lv3'),
   lv4      : document.getElementById('lv4'),
+  lv5      : document.getElementById('lv5'),
+  l5Seq    : document.getElementById('l5Seq'),
   swipeZone: document.getElementById('swipeZone'),
   l4WindNeedle: document.getElementById('l4WindNeedle'),
   l4WindArrow : document.getElementById('l4WindArrow'),
@@ -766,6 +788,7 @@ function updateL2Progress(){
 
 function startLevel2(){
   const C = CONFIG.lvl2;
+  resetL5Scene();
   resetL4Scene();
   L2.active = true; L2.done = false;
   L2.timeLeft = C.time; L2.misses = 0;
@@ -808,6 +831,7 @@ function startLevel2(){
 }
 
 function setLevel1Scene(){
+  resetL5Scene();
   resetL4Scene();
   document.body.classList.remove('level2');
   document.body.classList.remove('level3');
@@ -1211,6 +1235,7 @@ function updateL3Progress(){
 
 function startLevel3(){
   const C = CONFIG.lvl3;
+  resetL5Scene();
   resetL4Scene();
   L3.active = true; L3.done = false;
   L3.timeLeft = C.time; L3.misses = 0;
@@ -1661,6 +1686,7 @@ function l4ApplyHint(){
 
 function startLevel4(){
   const C = CONFIG.lvl4;
+  resetL5Scene();
   L4.active = true; L4.done = false;
   L4.phase = 'play'; L4.phaseT = 0;
   L4.step = 0; L4.stepT = 1; L4.stepFoot = null; L4.nextFoot = null;
@@ -2028,11 +2054,467 @@ function updateLevel4(dt, now){
 }
 
 // ============================================================
+// 第五关：跳房子（雨后的粉笔格子）
+//
+// 地上画着 1~8 格，每一格都有一套固定的动作序列（左手 / 右手 / 左脚 / 右脚）。
+// 按顺序按对四个按钮 → 整串做完，奶蛙就跳到下一格；
+// 按错 → 记一次失误，这一格的序列从头再按，人原地不动。
+// 8 格全部跳完 = 通关。正计时，不设时间限制，结算看「用时 + 失误」。
+// ============================================================
+const L5_LIMB = { HL: '左手', HR: '右手', FL: '左脚', FR: '右脚' };
+
+const L5 = {
+  active: false, done: false, phase: 'play', phaseT: 0,
+  tile: 0,                 // 已经跳过的格数（0~8）
+  idx: 0,                  // 当前这格已经按对了几步
+  jumpT: 1, jumpY: 0, fromX: 0, toX: 0,
+  fx: 0, misses: 0, elapsed: 0,
+  limb: null, limbT: 0,    // 最近按下的肢体（用来抬一下手脚）
+  noteT: 0, missDir: 1,
+  props: null, tiles: [], ring: null,
+  hudCache: '', taskCache: '', seqCache: '',
+};
+window.__l5 = L5;   // 方便调试
+
+function l5TileX(i){
+  const C = CONFIG.lvl5;
+  return C.startX + (i + 1) * C.gap;
+}
+
+function l5ChalkTexture(n, accent){
+  const S = 256;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const c = cv.getContext('2d');
+  // 淡淡的白粉笔底色 + 擦痕
+  c.fillStyle = 'rgba(250,248,236,0.14)';
+  c.fillRect(0, 0, S, S);
+  for(let i = 0; i < 26; i++){
+    c.fillStyle = 'rgba(255,255,255,' + (0.05 + Math.random() * 0.10).toFixed(2) + ')';
+    c.beginPath();
+    c.arc(Math.random() * S, Math.random() * S, 1 + Math.random() * 7, 0, Math.PI * 2);
+    c.fill();
+  }
+  // 粉笔双线框
+  c.strokeStyle = accent;
+  c.lineWidth = 11;
+  c.strokeRect(9, 9, S - 18, S - 18);
+  c.globalAlpha = 0.45;
+  c.lineWidth = 4;
+  c.strokeRect(21, 21, S - 42, S - 42);
+  c.globalAlpha = 1;
+  // 格子号
+  c.fillStyle = accent;
+  c.font = '900 128px "PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  c.fillText(String(n), S / 2, S / 2 + 6);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+function buildL5Props(){
+  if(L5.props) return L5.props;
+  const C = CONFIG.lvl5;
+  const g = new THREE.Group();
+  const ACCENTS = ['#ff9a6c', '#7fe0b4', '#8ec5ff', '#ffe27a'];
+
+  // 起跳线（粉笔横线）
+  addBox(0.10, 0.02, 1.9, 0xfff3d6, C.startX, 0.022, 0, g);
+
+  // 1~8 格：直接用粉笔画在地上
+  L5.tiles.length = 0;
+  for(let i = 0; i < C.steps; i++){
+    const mat = new THREE.MeshBasicMaterial({
+      map: l5ChalkTexture(i + 1, ACCENTS[i % ACCENTS.length]),
+      transparent: true, opacity: 0.96, depthWrite: false,
+    });
+    const tile = new THREE.Mesh(new THREE.PlaneGeometry(0.98, 0.98), mat);
+    tile.rotation.x = -Math.PI / 2;
+    tile.position.set(l5TileX(i), 0.024, 0);
+    tile.renderOrder = 2;
+    g.add(tile);
+    L5.tiles.push(tile);
+  }
+
+  // 雨后的小水洼（延续第四关的天气）
+  const pudMat = new THREE.MeshLambertMaterial({ color: 0x6f8ea8, transparent: true, opacity: 0.42 });
+  for(const [px, pz, s] of [[2.6, 1.5, 1.0], [5.2, -1.6, 1.2], [8.4, 1.7, 0.9]]){
+    const m = new THREE.Mesh(new THREE.CircleGeometry(0.5, 20), pudMat);
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(px, 0.016, pz);
+    m.scale.set(s, s * 0.68, 1);
+    g.add(m);
+  }
+
+  // 目标格的光圈（提示“下一格在这里”）
+  const ring5 = new THREE.Mesh(
+    new THREE.RingGeometry(0.48, 0.62, 40),
+    new THREE.MeshBasicMaterial({
+      color: 0xffd93d, transparent: true, opacity: 0.75,
+      side: THREE.DoubleSide, depthWrite: false,
+    })
+  );
+  ring5.rotation.x = -Math.PI / 2;
+  ring5.position.set(l5TileX(0), 0.040, 0);
+  ring5.visible = false;
+  g.add(ring5);
+  L5.ring = ring5;
+
+  g.visible = false;
+  scene.add(g);
+  L5.props = g;
+  return g;
+}
+
+function l5TaskText(){
+  if(L5.done || L5.phase === 'win') return '🎉 8 格全部跳完！';
+  if(L5.phase === 'jump') return '跳！';
+  if(L5.phase === 'miss') return null;        // 失误文案由 l5Miss 单独写
+  const seq = CONFIG.lvl5.seqs[L5.tile];
+  if(!seq) return '🎉 8 格全部跳完！';
+  return '第 ' + (L5.tile + 1) + ' 格：按顺序点按钮，全对就跳过去';
+}
+
+function l5SetTask(txt){
+  if(!txt || !el.l2Task) return;
+  if(L5.taskCache === txt) return;
+  L5.taskCache = txt;
+  el.l2Task.textContent = txt;
+}
+
+function updateL5Progress(){
+  if(el.l2Step) el.l2Step.textContent = L5.tile + '/' + CONFIG.lvl5.steps;
+}
+
+// 底部序列条：按对的一步步打勾，当前该按的那个高亮
+function l5UpdateSeqBar(){
+  if(!el.l5Seq) return;
+  const seq = CONFIG.lvl5.seqs[L5.tile];
+  const nowIdx = (L5.active && !L5.done && L5.phase === 'play') ? L5.idx : -1;
+  const key = L5.tile + '/' + (seq ? seq.join('') : '-') + '/' + nowIdx;
+  if(key === L5.seqCache) return;
+  L5.seqCache = key;
+  if(!seq){ el.l5Seq.innerHTML = ''; return; }
+  el.l5Seq.innerHTML = seq.map((code, i)=>{
+    let cls = 'l5chip ' + (code[0] === 'H' ? 'hand' : 'foot');
+    if(i < L5.idx) cls += ' done';
+    if(i === nowIdx) cls += ' now';
+    return '<span class="' + cls + '">' + L5_LIMB[code] + '</span>';
+  }).join('<i class="l5arrow">→</i>');
+}
+
+function l5ApplyHint(){
+  const seq = CONFIG.lvl5.seqs[L5.tile];
+  const live = L5.active && !L5.done && L5.phase === 'play';
+  const need = live && seq ? seq[L5.idx] : null;
+  if(el.btnL) el.btnL.classList.toggle('want', need === 'HL');
+  if(el.btnR) el.btnR.classList.toggle('want', need === 'HR');
+  if(el.footL) el.footL.classList.toggle('want', need === 'FL');
+  if(el.footR) el.footR.classList.toggle('want', need === 'FR');
+}
+
+function startLevel5(){
+  const C = CONFIG.lvl5;
+  resetL5Scene();
+  resetL4Scene();
+  L5.active = true; L5.done = false;
+  L5.phase = 'play'; L5.phaseT = 0;
+  L5.tile = 0; L5.idx = 0;
+  L5.jumpT = 1; L5.jumpY = 0;
+  L5.fx = C.startX; L5.fromX = C.startX; L5.toX = C.startX;
+  L5.misses = 0; L5.elapsed = 0;
+  L5.limb = null; L5.limbT = 0;
+  L5.noteT = 0; L5.missDir = 1;
+  L5.hudCache = ''; L5.taskCache = ''; L5.seqCache = '';
+
+  ring.visible = false;
+  for(const p of pads) p.visible = false;
+  buildL5Props().visible = true;
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  if(L2.props) L2.props.visible = false;
+  if(L3.props) L3.props.visible = false;
+  if(L4.props) L4.props.visible = false;
+  if(L4.umb) L4.umb.visible = false;
+
+  document.body.classList.add('level5');
+  setSky(0xbfe7ff);
+
+  if(el.l2TimeLbl) el.l2TimeLbl.textContent = '用时';
+  if(el.l2StepLbl) el.l2StepLbl.textContent = '格数';
+  if(el.l2TimeChip) el.l2TimeChip.classList.remove('low');
+  if(el.btnL){ el.btnL.innerHTML = '<span>←</span>左手'; el.btnL.classList.remove('drop'); el.btnL.classList.remove('want'); }
+  if(el.btnR){ el.btnR.innerHTML = '<span>→</span>右手'; el.btnR.classList.remove('drop'); el.btnR.classList.remove('want'); }
+  if(el.footL){ el.footL.innerHTML = '<span>↓</span>左脚'; el.footL.classList.remove('want'); }
+  if(el.footR){ el.footR.innerHTML = '<span>↓</span>右脚'; el.footR.classList.remove('want'); }
+
+  if(frog){
+    frog.root.position.set(C.startX, 0, 0);
+    frog.root.rotation.y = CONFIG.frog.yaw;
+    frog.body.rotation.set(0, 0, 0);
+    frog.body.position.set(0, 0, 0);
+    for(const k in frog.parts){
+      const p = frog.parts[k];
+      p.pose.x = p.pose.y = p.pose.z = 0;
+    }
+  }
+  G.camX = C.startX + 1.25; G.camZ = C.camZ; G.camY = C.camY;
+
+  updateL5Progress();
+  l5SetTask(l5TaskText());
+  l5UpdateSeqBar();
+  l5ApplyHint();
+  updateL5HUD();
+  Sfx.init();
+}
+
+// 离开第五关：收起格子、恢复天空和标签
+function resetL5Scene(){
+  document.body.classList.remove('level5');
+  L5.active = false; L5.done = false;
+  L5.phase = 'play'; L5.phaseT = 0;
+  L5.limb = null; L5.limbT = 0;
+  if(L5.props) L5.props.visible = false;
+  if(L5.ring) L5.ring.visible = false;
+  if(el.l5Seq) el.l5Seq.innerHTML = '';
+  L5.seqCache = ''; L5.taskCache = '';
+  if(el.l2TimeLbl) el.l2TimeLbl.textContent = '剩余';
+  if(el.l2StepLbl) el.l2StepLbl.textContent = '台阶';
+  if(el.l2TimeChip) el.l2TimeChip.classList.remove('low');
+  for(const b of [el.btnL, el.btnR, el.footL, el.footR]) if(b) b.classList.remove('want');
+}
+
+// ---- 按下某个肢体：按对就推进，整串按完就跳 ----
+function l5Press(code){
+  if(G.level !== 5 || !L5.active || L5.done) return;
+  if(L5.phase !== 'play') return;
+  const seq = CONFIG.lvl5.seqs[L5.tile];
+  if(!seq || L5.idx >= seq.length) return;
+
+  L5.limb = code; L5.limbT = 0.001;
+
+  if(code !== seq[L5.idx]){
+    l5Miss(code);
+    return;
+  }
+  L5.idx++;
+  Sfx.tick(false);
+  l5UpdateSeqBar();
+  if(L5.idx >= seq.length){
+    l5Jump();
+  }else{
+    l5ApplyHint();
+    L5.taskCache = '';
+    l5SetTask(l5TaskText());
+  }
+}
+
+function l5Jump(){
+  L5.phase = 'jump'; L5.phaseT = 0;
+  L5.fromX = L5.fx;
+  L5.toX = l5TileX(L5.tile);
+  L5.jumpT = 0; L5.jumpY = 0;
+  Sfx.step();
+  L5.taskCache = '';
+  l5SetTask('跳！');
+  l5UpdateSeqBar();
+  l5ApplyHint();
+}
+
+function l5Miss(code){
+  L5.misses++;
+  L5.idx = 0;
+  L5.phase = 'miss'; L5.phaseT = 0;
+  L5.missDir = (code === 'HL' || code === 'FL') ? -1 : 1;
+  L5.noteT = CONFIG.lvl5.missHold;
+  Sfx.thud();
+  L5.taskCache = '';
+  if(el.l2Task) el.l2Task.textContent = '按错啦 —— 第 ' + (L5.tile + 1) +
+    ' 格从头按（失误 ' + L5.misses + ' 次）';
+  updateL5HUD();
+  l5UpdateSeqBar();
+  l5ApplyHint();
+}
+
+function l5Win(){
+  if(L5.done) return;
+  L5.done = true; L5.active = false;
+  L5.phase = 'win'; L5.phaseT = 0;
+  L5.jumpT = 1; L5.jumpY = 0;
+  Sfx.win();
+  updateL5HUD();
+  l5UpdateSeqBar();
+  l5ApplyHint();
+  const used = L5.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('🏁 跳完 8 格！',
+      '用时 <b>' + used + '</b> 秒 · 失误 <b>' + L5.misses + '</b> 次', '再跳一次');
+  }, 1400);
+}
+
+function updateL5HUD(){
+  const key = L5.elapsed.toFixed(1) + '/' + L5.misses + '/' + L5.tile;
+  if(key === L5.hudCache) return;
+  L5.hudCache = key;
+  if(el.l2Time) el.l2Time.textContent = L5.elapsed.toFixed(1);
+  if(el.l2Miss) el.l2Miss.textContent = L5.misses;
+  updateL5Progress();
+}
+
+function l5Pose(dt, now){
+  const t = now * 0.001;
+  TGT = {};
+  for(const k of BONES) TGT[k] = { x: 0, y: 0, z: 0 };
+  BTGT = { rz: 0, ry: 0, y: 0 };
+  const br = Math.sin(t * 2.1);
+  TGT.spine.x = br * 0.02;
+  TGT.head.x = br * 0.035;
+  TGT.armL.z = 0.05 + br * 0.02;
+  TGT.armR.z = -0.05 - br * 0.02;
+  TGT.legL.z = 0.04;
+  TGT.legR.z = -0.04;
+
+  if(L5.phase === 'win'){
+    const hop = Math.abs(Math.sin(t * 5.2));
+    BTGT.y = hop * 0.20;
+    TGT.armL.z = 1.30 + hop * 0.18;
+    TGT.armR.z = -1.30 - hop * 0.2;
+    TGT.head.x = -0.15;
+    applyPose(dt);
+    return;
+  }
+
+  if(L5.phase === 'miss'){
+    const k = Math.min(1, L5.phaseT / 0.55);
+    const s = Math.sin(k * Math.PI);
+    BTGT.rz = L5.missDir * 0.50 * s;
+    BTGT.y = -0.03 * s;
+    TGT.armL.z = 0.52 * s;
+    TGT.armR.z = -0.52 * s;
+    TGT.head.z = -BTGT.rz * 0.5;
+    TGT.legL.z = 0.16 * s;
+    TGT.legR.z = -0.16 * s;
+    applyPose(dt);
+    return;
+  }
+
+  if(L5.phase === 'jump'){
+    const s = Math.sin(Math.PI * Math.min(1, L5.jumpT));
+    TGT.legL.z = -0.55 * s;
+    TGT.legR.z = -0.55 * s;
+    TGT.armL.z = 0.75 * s;
+    TGT.armR.z = -0.75 * s;
+    TGT.spine.x = 0.10 * s;
+    TGT.head.x = -0.10 * s;
+    applyPose(dt);
+    return;
+  }
+
+  // play：按对一下，对应的手脚就抬一下
+  if(L5.limb && L5.limbT > 0 && L5.limbT < 0.30){
+    const p = Math.sin(Math.PI * Math.min(1, L5.limbT / 0.26));
+    if(L5.limb === 'HL') TGT.armL.z += 1.05 * p;
+    else if(L5.limb === 'HR') TGT.armR.z -= 1.05 * p;
+    else if(L5.limb === 'FL'){ TGT.legL.z = -0.55 * p; TGT.legR.z = 0.10 * p; }
+    else { TGT.legR.z = -0.55 * p; TGT.legL.z = -0.10 * p; }
+    BTGT.y = 0.02 * p;
+  }
+  applyPose(dt);
+}
+
+function l5Camera(dt){
+  const C = CONFIG.lvl5;
+  const portrait = camera.aspect < 1.15;
+  let wantX = L5.fx + 1.25;
+  let wantZ = C.camZ;
+  let wantY = C.camY;
+  if(portrait){
+    const halfNeed = 2.10;
+    const hFov = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(CONFIG.cam.fov) * 0.5) * camera.aspect);
+    wantZ = THREE.MathUtils.clamp(halfNeed / Math.tan(hFov * 0.5), C.camZ, 32);
+    wantX = L5.fx + 0.55;
+    wantY = THREE.MathUtils.lerp(C.camY, CONFIG.cam.y, (wantZ - C.camZ) / (32 - C.camZ));
+  }
+  G.camX += (wantX - G.camX) * (1 - Math.exp(-dt * 3));
+  G.camZ += (wantZ - G.camZ) * (1 - Math.exp(-dt * 3));
+  G.camY += (wantY - G.camY) * (1 - Math.exp(-dt * 3));
+  camera.position.x = G.camX;
+  camera.position.y = G.camY;
+  camera.position.z = G.camZ;
+  camera.lookAt(G.camX, 1.35, 0);
+  scene.fog.near = Math.max(24, camera.position.z + 6);
+  scene.fog.far = scene.fog.near + 52;
+}
+
+function updateLevel5(dt, now){
+  const C = CONFIG.lvl5;
+  L5.phaseT += dt;
+  if(L5.active && !L5.done) L5.elapsed += dt;
+  if(L5.noteT > 0) L5.noteT -= dt;
+  if(L5.limbT > 0 && L5.limbT < 0.5) L5.limbT += dt;
+
+  if(L5.phase === 'jump'){
+    L5.jumpT = Math.min(1, L5.jumpT + dt / C.jumpT);
+    L5.fx = L5.fromX + (L5.toX - L5.fromX) * easeInOutCubic(L5.jumpT);
+    L5.jumpY = Math.sin(Math.PI * L5.jumpT) * C.jumpH;
+    if(L5.jumpT >= 1){
+      L5.fx = L5.toX;
+      L5.jumpY = 0;
+      L5.tile++;
+      L5.idx = 0;
+      L5.phase = 'play'; L5.phaseT = 0;
+      Sfx.tick(true);
+      updateL5Progress();
+      L5.taskCache = '';
+      l5SetTask(l5TaskText());
+      l5UpdateSeqBar();
+      l5ApplyHint();
+      if(L5.tile >= C.steps) l5Win();
+    }
+  }
+  else if(L5.phase === 'miss' && L5.phaseT >= C.missHold){
+    L5.phase = 'play'; L5.phaseT = 0;
+    L5.taskCache = '';
+    l5SetTask(l5TaskText());
+    l5UpdateSeqBar();
+    l5ApplyHint();
+  }
+
+  if(L5.noteT <= 0 && L5.phase === 'play') l5SetTask(l5TaskText());
+
+  // 目标格的光圈
+  if(L5.ring){
+    const show = L5.tile < C.steps && !L5.done;
+    L5.ring.visible = show;
+    if(show){
+      L5.ring.position.x = l5TileX(L5.tile);
+      const k = 0.5 + 0.5 * Math.sin(now * 0.006);
+      L5.ring.scale.setScalar(0.94 + 0.10 * k);
+      L5.ring.material.opacity = 0.50 + 0.35 * k;
+    }
+  }
+  for(let i = 0; i < L5.tiles.length; i++){
+    L5.tiles[i].material.opacity = i < L5.tile ? 0.45 : 0.96;
+  }
+
+  if(frog){
+    frog.root.position.set(L5.fx, L5.jumpY, 0);
+    l5Pose(dt, now);
+  }
+  l5Camera(dt);
+  updateL5HUD();
+}
+
+// ============================================================
 // 每帧更新
 // ============================================================
 let lastT = performance.now();
 
 function update(dt, now){
+  if(G.level === 5){ updateLevel5(dt, now); return; }
   if(G.level === 4){ updateLevel4(dt, now); return; }
   if(G.level === 3){ updateLevel3(dt, now); return; }
   if(G.level === 2){ updateLevel2(dt, now); return; }
@@ -2197,6 +2679,15 @@ function frame(){
 addEventListener('keydown', e=>{
   if(e.repeat) return;
   const k = e.key.toLowerCase();
+  if(G.level === 5){
+    // A / D 左右手，J / K 左右脚
+    if(k === 'a'){ e.preventDefault(); l5Press('HL'); }
+    else if(k === 'd'){ e.preventDefault(); l5Press('HR'); }
+    else if(k === 'j'){ e.preventDefault(); l5Press('FL'); }
+    else if(k === 'k'){ e.preventDefault(); l5Press('FR'); }
+    else if(k === 'r' && L5.done) startGame(5);
+    return;
+  }
   if(G.level === 4){
     // 按住 A 撑伞，← / → 滑动扶伞，J / K 踩左右脚
     if(k === 'a'){ e.preventDefault(); l4PadDown(); }
@@ -2246,7 +2737,8 @@ for(const [id, side] of [['btnL', 'L'], ['btnR', 'R']]){
   const node = document.getElementById(id);
   node.addEventListener('pointerdown', e=>{
     e.preventDefault();
-    if(G.level === 4) l4PadDown();
+    if(G.level === 5) l5Press(side === 'L' ? 'HL' : 'HR');
+    else if(G.level === 4) l4PadDown();
     else if(G.level === 3) l3HandDown(side);
     else if(G.level === 2) l2PadDown(side);
     else pressFoot(side);
@@ -2269,7 +2761,8 @@ for(const [id, side] of [['footL', 'L'], ['footR', 'R']]){
   const node = document.getElementById(id);
   node.addEventListener('pointerdown', e=>{
     e.preventDefault();
-    if(G.level === 4) l4FootTap(side);
+    if(G.level === 5) l5Press(side === 'L' ? 'FL' : 'FR');
+    else if(G.level === 4) l4FootTap(side);
     else if(G.level === 3) l3FootTap(side);
   }, { passive: false });
   node.addEventListener('contextmenu', e=>e.preventDefault());
@@ -2308,17 +2801,19 @@ el.lv1.addEventListener('click', ()=>startGame(1));
 el.lv2.addEventListener('click', ()=>startGame(2));
 el.lv3.addEventListener('click', ()=>startGame(3));
 el.lv4.addEventListener('click', ()=>startGame(4));
+el.lv5.addEventListener('click', ()=>startGame(5));
 el.ovBtn.addEventListener('click', ()=>startGame(G.level || 1));
 el.ovHomeBtn.addEventListener('click', ()=>showHome());
 el.homeChip.addEventListener('click', ()=>showHome());
 
 function startGame(level){
   if(!G.ready) return;      // 素材还没加载完
-  G.level = (level === 4) ? 4 : ((level === 3) ? 3 : ((level === 2) ? 2 : 1));
+  G.level = (level === 5) ? 5 : ((level === 4) ? 4 : ((level === 3) ? 3 : ((level === 2) ? 2 : 1)));
   G.screen = 'game';
   el.overlay.classList.remove('show');
   document.body.classList.add('ingame');
-  if(G.level === 4) startLevel4();
+  if(G.level === 5) startLevel5();
+  else if(G.level === 4) startLevel4();
   else if(G.level === 3) startLevel3();
   else if(G.level === 2) startLevel2();
   else { setLevel1Scene(); resetGame(); }

@@ -167,6 +167,39 @@
     #l2Task{max-width:94vw}
   }
 
+  /* ---------- 第五关：跳房子（四个动作按钮 + 序列条） ---------- */
+  body.level5 #hud2{display:block}
+  body.level5 .top,body.level5 #hint{display:none}
+  body.level5 #l2ProgWrap{display:none}
+  body.level5 .pad.foot{display:flex}
+  body.level5 .pad{width:clamp(66px,13vmin,96px);height:clamp(66px,13vmin,96px);
+    font-size:clamp(13px,3vmin,18px)}
+  body.level5 #btnL{left:calc(18px + env(safe-area-inset-left));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level5 #btnR{right:calc(18px + env(safe-area-inset-right));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level5 #footL{left:calc(18px + env(safe-area-inset-left))}
+  body.level5 #footR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 这一格要按的动作序列：底部中间一条 */
+  #l5Seq{position:fixed;left:50%;transform:translateX(-50%);z-index:12;display:none;
+    bottom:calc(20px + env(safe-area-inset-bottom));
+    max-width:calc(100vw - 208px);
+    flex-wrap:wrap;gap:6px;align-items:center;justify-content:center;
+    pointer-events:none}
+  body.level5 #l5Seq{display:flex}
+  .l5chip{display:flex;align-items:center;justify-content:center;min-width:50px;
+    padding:6px 11px;border-radius:12px;font-size:13px;font-weight:900;
+    background:rgba(20,28,42,.62);border:1px solid rgba(255,255,255,.28);
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+    transition:transform .12s,opacity .12s,background .12s}
+  .l5chip.hand{color:#ffe27a;border-color:rgba(255,217,61,.6)}
+  .l5chip.foot{color:#9df0bd;border-color:rgba(61,220,132,.6)}
+  .l5chip.done{opacity:.32}
+  .l5chip.now{background:rgba(255,217,61,.92);color:#243044;border-color:#fff6d2;
+    transform:scale(1.14);box-shadow:0 0 16px rgba(255,217,61,.75)}
+  .l5arrow{font-style:normal;color:rgba(255,255,255,.72);font-weight:900;font-size:12px}
+
   /* ---------- 遮罩 ---------- */
   .overlay{position:fixed;inset:0;z-index:20;display:none;
     align-items:center;justify-content:center;padding:20px;
@@ -258,6 +291,7 @@
       <div id="l4WindTrack"><div id="l4WindSafe"></div><div id="l4WindNeedle"></div></div>
     </div>
   </div>
+  <div id="l5Seq"></div>
   <div class="pad" id="btnL"><span>←</span>左脚</div>
   <div class="pad" id="btnR"><span>→</span>右脚</div>
   <div class="pad foot" id="footL"><span>↓</span>左脚</div>
@@ -281,7 +315,7 @@
   <!-- 关卡列表 -->
   <div class="panel" id="panelLevels" hidden>
     <h1>选择关卡</h1>
-    <div class="sub">目前开放 4 关</div>
+    <div class="sub">目前开放 5 关</div>
     <div class="lvlist">
       <div class="lv" id="lv1">
         <div class="lvno">第一关</div>
@@ -312,6 +346,14 @@
         <div class="lvmeta">
           <div class="lvname">奶蛙撑伞过马路</div>
           <div class="lvdesc">左手按住撑伞不松，右手左右滑把伞扶正，左右脚交替踩过斑马线</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv5">
+        <div class="lvno">第五关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙跳房子</div>
+          <div class="lvdesc">地上的粉笔格子写着动作顺序，按对就跳一格，按错原地重按</div>
         </div>
         <div class="lvgo">开始</div>
       </div>
