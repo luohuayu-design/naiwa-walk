@@ -200,6 +200,70 @@
     transform:scale(1.14);box-shadow:0 0 16px rgba(255,217,61,.75)}
   .l5arrow{font-style:normal;color:rgba(255,255,255,.72);font-weight:900;font-size:12px}
 
+  /* ---------- 第六 ~ 十关 ---------- */
+  body.level6 #hud2,body.level7 #hud2,body.level8 #hud2,
+  body.level9 #hud2,body.level10 #hud2{display:block}
+  body.level6 .top,body.level6 #hint,
+  body.level7 .top,body.level7 #hint,
+  body.level8 .top,body.level8 #hint,
+  body.level9 .top,body.level9 #hint,
+  body.level10 .top,body.level10 #hint{display:none}
+
+  /* 第六 / 七关：只用脚（隐藏手按钮） */
+  body.level6 #btnL,body.level6 #btnR,
+  body.level7 #btnL,body.level7 #btnR{display:none}
+  body.level6 .pad.foot,body.level7 .pad.foot{display:flex;
+    width:clamp(76px,15vmin,112px);height:clamp(76px,15vmin,112px);
+    font-size:clamp(15px,3.6vmin,22px)}
+  body.level6 #footL,body.level7 #footL{left:calc(18px + env(safe-area-inset-left))}
+  body.level6 #footR,body.level7 #footR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 第八 / 十关：四个按钮（上排手、下排脚），沿用第五关布局 */
+  body.level8 .pad.foot,body.level10 .pad.foot{display:flex}
+  body.level8 .pad,body.level10 .pad{width:clamp(66px,13vmin,96px);height:clamp(66px,13vmin,96px);
+    font-size:clamp(13px,3vmin,18px)}
+  body.level8 #btnL,body.level10 #btnL{left:calc(18px + env(safe-area-inset-left));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level8 #btnR,body.level10 #btnR{right:calc(18px + env(safe-area-inset-right));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level8 #footL,body.level10 #footL{left:calc(18px + env(safe-area-inset-left))}
+  body.level8 #footR,body.level10 #footR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 第八 / 十关底部序列条 */
+  body.level8 #l5Seq,body.level10 #l5Seq{display:flex}
+  @media (orientation:portrait){
+    body.level8 #l5Seq,body.level10 #l5Seq{
+      max-width:94vw;flex-wrap:nowrap;overflow-x:auto;
+      bottom:calc(18px + 2 * clamp(66px,13vmin,96px) + 28px + env(safe-area-inset-bottom));
+    }
+    body.level8 #l5Seq .l5chip,body.level10 #l5Seq .l5chip{padding:4px 6px;font-size:11px}
+    body.level8 #l5Seq .l5arrow,body.level10 #l5Seq .l5arrow{font-size:10px}
+  }
+
+  /* 第七关：蓄力条里的绿区 */
+  #l7Zone{position:absolute;top:0;bottom:0;left:0;width:0;display:none;
+    background:rgba(61,220,132,.55);box-shadow:0 0 10px rgba(61,220,132,.85)}
+
+  /* 第九关：只留圆形手势区 */
+  body.level9 .pad,body.level9 #l5Seq{display:none}
+  body.level9 #l2ProgWrap{display:none}
+  #l9Zone{position:fixed;right:calc(20px + env(safe-area-inset-right));z-index:12;display:none;
+    bottom:calc(24px + env(safe-area-inset-bottom));
+    width:min(34vw,150px);height:min(34vw,150px);border-radius:50%;
+    border:3px dashed rgba(255,255,255,.55);background:rgba(16,26,44,.42);
+    touch-action:none;pointer-events:auto;align-items:center;justify-content:center;
+    backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+  body.level9 #l9Zone.show{display:flex}
+  #l9Zone.bad{border-color:#ff7b7b;background:rgba(90,20,26,.5)}
+  #l9Ring{position:absolute;inset:8%;border-radius:50%;
+    background:conic-gradient(#3ddc84 calc(var(--p,0) * 1turn),rgba(255,255,255,.16) 0);
+    -webkit-mask:radial-gradient(circle,transparent 62%,#000 63%);
+    mask:radial-gradient(circle,transparent 62%,#000 63%)}
+  #l9Ring::after{content:"";position:absolute;inset:0;border-radius:50%;
+    border:2px dashed rgba(255,255,255,.55)}
+  #l9Lbl{color:#e6f3ff;font-size:12px;font-weight:800;line-height:1.5;text-align:center;
+    letter-spacing:.03em;text-shadow:0 2px 6px rgba(0,20,50,.5);pointer-events:none}
+
   /* ---------- 遮罩 ---------- */
   .overlay{position:fixed;inset:0;z-index:20;display:none;
     align-items:center;justify-content:center;padding:20px;
@@ -285,12 +349,13 @@
       <div class="l2chip"><span>失误</span><b id="l2Miss">0</b></div>
     </div>
     <div id="l2Task">双指同时按住左右两个把手，稳住身体</div>
-    <div id="l2ProgWrap"><div id="l2ProgFill"></div><div id="l2ProgMarks"></div></div>
+    <div id="l2ProgWrap"><div id="l2ProgFill"></div><div id="l2ProgMarks"></div><div id="l7Zone"></div></div>
     <div id="l4Wind">
       <div id="l4WindLbl"><span>伞的倾斜</span><span><b id="l4WindArrow">←</b> 风力 <b id="l4WindLv">1</b></span></div>
       <div id="l4WindTrack"><div id="l4WindSafe"></div><div id="l4WindNeedle"></div></div>
     </div>
   </div>
+  <div id="l9Zone"><div id="l9Ring"></div><div id="l9Lbl">顺时针画圈</div></div>
   <div id="l5Seq"></div>
   <div class="pad" id="btnL"><span>←</span>左脚</div>
   <div class="pad" id="btnR"><span>→</span>右脚</div>
@@ -315,7 +380,7 @@
   <!-- 关卡列表 -->
   <div class="panel" id="panelLevels" hidden>
     <h1>选择关卡</h1>
-    <div class="sub">目前开放 5 关</div>
+    <div class="sub">目前开放 10 关</div>
     <div class="lvlist">
       <div class="lv" id="lv1">
         <div class="lvno">第一关</div>
@@ -354,6 +419,46 @@
         <div class="lvmeta">
           <div class="lvname">奶蛙跳房子</div>
           <div class="lvdesc">地上的粉笔格子写着动作顺序，按对就跳一格，按错原地重按</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv6">
+        <div class="lvno">第六关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙跳绳</div>
+          <div class="lvdesc">绳子扫到脚底时按发光的脚，左右脚交替跳过 8 次</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv7">
+        <div class="lvno">第七关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙跳台阶</div>
+          <div class="lvdesc">按住脚蓄力，松手卡进绿区，一级一级跳上 8 级台阶</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv8">
+        <div class="lvno">第八关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙记节奏</div>
+          <div class="lvdesc">先看一遍四块踏板的动作顺序，再原样复现，一共 5 轮</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv9">
+        <div class="lvno">第九关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙擦车窗</div>
+          <div class="lvdesc">按住圆圈顺着箭头画圈，把四扇脏车窗全部擦干净</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv10">
+        <div class="lvno">第十关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙拍手跺脚</div>
+          <div class="lvdesc">每一拍要同时按下两个部位，差一点点都算错，共 8 拍</div>
         </div>
         <div class="lvgo">开始</div>
       </div>

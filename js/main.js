@@ -74,6 +74,54 @@ const CONFIG = {
       ['HL', 'FR', 'HR', 'FL'],
     ],
   },
+  // 第六关：跳绳（绳子转圈扫到脚下时，按发光的脚跳过去，左右脚交替）
+  lvl6 : {
+    x: 2.0, jumps: 8,
+    ropeR: 1.05, handleY: 1.12,   // 绳子的半圆半径 / 把手高度
+    period: 1.45,                 // 绳子转一圈
+    winA: 0.86,                   // 起跳窗口（离最低点的弧度）
+    jumpT: 0.30, jumpH: 0.46,
+    missHold: 0.95,
+    busX: 15.0,
+  },
+  // 第七关：蓄力跳台阶（按住任意脚蓄力，松手卡在绿区才跳到下一台）
+  lvl7 : {
+    startX: 1.20, gap: 1.55, stepY: 0.16, steps: 8,
+    chargeUp: 0.95, chargeDown: 0.95,
+    jumpT: 0.46, jumpH: 0.58,
+    missHold: 0.75,
+    // 每一台的绿区（蓄力条 0~1 的区间），越往后越窄
+    zones: [
+      [0.62, 0.96], [0.56, 0.90], [0.50, 0.84], [0.44, 0.78],
+      [0.38, 0.70], [0.32, 0.64], [0.27, 0.57], [0.22, 0.50],
+    ],
+    busX: 16.5,
+  },
+  // 第八关：记节奏（先看一遍四个踏板的顺序，再原样复现）
+  lvl8 : {
+    x: 2.0,
+    rounds: 5, lens: [3, 4, 4, 5, 5],
+    demoGap: 0.55, roundGap: 0.90, missHold: 0.85,
+    busX: 13.5,
+  },
+  // 第九关：擦车窗（按住圆圈顺着箭头方向画圈，把四扇车窗擦干净）
+  lvl9 : {
+    busX: 6.2,
+    windows: 4, turns: 2.2,
+    dirs: [1, -1, 1, -1],   // 1 = 顺时针，-1 = 逆时针
+    missCool: 1.6,
+    frogDX: 3.7, frogZ: 0.6, camX: 0.7, camHalf: 4.1,
+  },
+  // 第十关：拍手跺脚（两个动作要一起按，差一点点都算错）
+  lvl10 : {
+    x: 2.0, beats: 8,
+    window: 1.05, gap: 0.50, syncT: 0.24,
+    pairs: [
+      ['HL', 'FR'], ['HR', 'FL'], ['HL', 'HR'], ['FL', 'FR'],
+      ['HL', 'FL'], ['HR', 'FR'], ['HL', 'FR'], ['HL', 'HR'],
+    ],
+    busX: 13.0,
+  },
 };
 const BEAT_MS = 60000 / CONFIG.beat.bpm;
 
@@ -383,7 +431,16 @@ const el = {
   lv3      : document.getElementById('lv3'),
   lv4      : document.getElementById('lv4'),
   lv5      : document.getElementById('lv5'),
+  lv6      : document.getElementById('lv6'),
+  lv7      : document.getElementById('lv7'),
+  lv8      : document.getElementById('lv8'),
+  lv9      : document.getElementById('lv9'),
+  lv10     : document.getElementById('lv10'),
   l5Seq    : document.getElementById('l5Seq'),
+  l7Zone   : document.getElementById('l7Zone'),
+  l9Zone   : document.getElementById('l9Zone'),
+  l9Ring   : document.getElementById('l9Ring'),
+  l9Lbl    : document.getElementById('l9Lbl'),
   swipeZone: document.getElementById('swipeZone'),
   l4WindNeedle: document.getElementById('l4WindNeedle'),
   l4WindArrow : document.getElementById('l4WindArrow'),
@@ -788,8 +845,7 @@ function updateL2Progress(){
 
 function startLevel2(){
   const C = CONFIG.lvl2;
-  resetL5Scene();
-  resetL4Scene();
+  resetAllLevels();
   L2.active = true; L2.done = false;
   L2.timeLeft = C.time; L2.misses = 0;
   L2.fx = C.startX; L2.fy = 0;
@@ -831,8 +887,7 @@ function startLevel2(){
 }
 
 function setLevel1Scene(){
-  resetL5Scene();
-  resetL4Scene();
+  resetAllLevels();
   document.body.classList.remove('level2');
   document.body.classList.remove('level3');
   L2.active = false; L2.done = false;
@@ -1235,8 +1290,7 @@ function updateL3Progress(){
 
 function startLevel3(){
   const C = CONFIG.lvl3;
-  resetL5Scene();
-  resetL4Scene();
+  resetAllLevels();
   L3.active = true; L3.done = false;
   L3.timeLeft = C.time; L3.misses = 0;
   L3.step = 0; L3.stepT = 0; L3.stepFoot = null;
@@ -1686,7 +1740,7 @@ function l4ApplyHint(){
 
 function startLevel4(){
   const C = CONFIG.lvl4;
-  resetL5Scene();
+  resetAllLevels();
   L4.active = true; L4.done = false;
   L4.phase = 'play'; L4.phaseT = 0;
   L4.step = 0; L4.stepT = 1; L4.stepFoot = null; L4.nextFoot = null;
@@ -2218,8 +2272,7 @@ function l5ApplyHint(){
 
 function startLevel5(){
   const C = CONFIG.lvl5;
-  resetL5Scene();
-  resetL4Scene();
+  resetAllLevels();
   L5.active = true; L5.done = false;
   L5.phase = 'play'; L5.phaseT = 0;
   L5.tile = 0; L5.idx = 0;
@@ -2509,11 +2562,1395 @@ function updateLevel5(dt, now){
 }
 
 // ============================================================
+// 第六关：跳绳
+//
+// 雨后路边支起一根跳绳，绳子的半圆绕着自己转圈。
+// 绳子扫到脚底的一瞬间，按下发光的脚 → 跳过去；左右脚交替。
+// 按早了 / 按错脚 / 绳子到脚底还没跳 → 记一次失误，绳子重新荡起来。
+// 8 次跳完 = 通关。
+// ============================================================
+const L6 = {
+  active: false, done: false, phase: 'play', phaseT: 0,
+  phi: Math.PI, jumps: 0, misses: 0, elapsed: 0,
+  jumped: false, jumpT: 1, jumpY: 0,
+  props: null, rope: null, ring: null,
+  hud: '', task: '', seq: '',
+};
+window.__l6 = L6;
+
+function l6SetTask(t){
+  if(!t || L6.task === t) return;
+  L6.task = t;
+  if(el.l2Task) el.l2Task.textContent = t;
+}
+
+function l6ApplyHint(){
+  const C = CONFIG.lvl6;
+  const live = L6.active && !L6.done && L6.phase === 'play' && L6.jumpT >= 1;
+  const side = L6.jumps % 2 === 0 ? 'L' : 'R';
+  if(el.footL) el.footL.classList.toggle('want', live && side === 'L');
+  if(el.footR) el.footR.classList.toggle('want', live && side === 'R');
+}
+
+function updateL6HUD(){
+  const key = L6.elapsed.toFixed(1) + '/' + L6.jumps + '/' + L6.misses;
+  if(key === L6.hud) return;
+  L6.hud = key;
+  if(el.l2Time) el.l2Time.textContent = L6.elapsed.toFixed(1);
+  if(el.l2Step) el.l2Step.textContent = L6.jumps + '/' + CONFIG.lvl6.jumps;
+  if(el.l2Miss) el.l2Miss.textContent = L6.misses;
+}
+
+function buildL6Props(){
+  if(L6.props) return L6.props;
+  const C = CONFIG.lvl6;
+  const g = new THREE.Group();
+  // 两根支绳的柱子（在人行道边上）
+  for(const px of [C.x - 1.5, C.x + 1.5]){
+    addBox(0.14, 1.5, 0.14, 0x8a6a3a, px, 0.75, -0.62, g);
+    addBox(0.48, 0.10, 0.48, 0x6f5630, px, 0.05, -0.62, g);
+    addBox(0.22, 0.10, 0.22, 0xffd93d, px, 1.52, -0.62, g);
+  }
+  // 绳子：以把手为圆心的下半圆，整体绕 z 轴转
+  const R = C.ropeR;
+  const pts = [];
+  for(let i = 0; i <= 26; i++){
+    const a = Math.PI + (i / 26) * Math.PI;
+    pts.push(new THREE.Vector3(Math.cos(a) * R, Math.sin(a) * R, 0));
+  }
+  const rope = new THREE.Group();
+  const tube = new THREE.Mesh(
+    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 44, 0.045, 8, false),
+    new THREE.MeshLambertMaterial({ color: 0xd94f4f })
+  );
+  rope.add(tube);
+  rope.position.set(C.x, C.handleY, 0.45);
+  g.add(rope);
+  L6.rope = rope;
+
+  // 脚底下的提示圈：进窗口时亮起
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.40, 0.56, 36),
+    new THREE.MeshBasicMaterial({ color: 0x3ddc84, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(C.x, 0.028, 0);
+  g.add(ring);
+  L6.ring = ring;
+
+  g.visible = false;
+  scene.add(g);
+  L6.props = g;
+  return g;
+}
+
+function startLevel6(){
+  const C = CONFIG.lvl6;
+  resetAllLevels();
+  L6.active = true; L6.done = false;
+  L6.phase = 'play'; L6.phaseT = 0;
+  L6.jumps = 0; L6.misses = 0; L6.elapsed = 0;
+  L6.phi = C.winA + 0.06; L6.jumped = false;
+  L6.jumpT = 1; L6.jumpY = 0;
+  L6.hud = ''; L6.task = '';
+  buildL6Props().visible = true;
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  document.body.classList.add('level6');
+  setSky(0xbfe7ff);
+  setLabels('用时', '跳数');
+  setBtnText(el.footL, '↓', '左脚');
+  setBtnText(el.footR, '↓', '右脚');
+
+  resetFrogAt(C.x, 0);
+  G.camX = C.x + 0.75; G.camZ = CONFIG.cam.z; G.camY = CONFIG.cam.y;
+  l6SetTask('等绳子扫到脚底，按发光的脚跳过去');
+  l6ApplyHint();
+  updateL6HUD();
+  Sfx.init();
+}
+
+function resetL6Scene(){
+  document.body.classList.remove('level6');
+  L6.active = false; L6.done = false;
+  L6.phase = 'play'; L6.jumpT = 1; L6.jumpY = 0;
+  if(L6.props) L6.props.visible = false;
+  if(L6.ring) L6.ring.material.opacity = 0;
+  L6.hud = ''; L6.task = '';
+}
+
+function l6Press(side){
+  if(G.level !== 6 || !L6.active || L6.done) return;
+  if(L6.phase !== 'play' || L6.jumpT < 1) return;
+  const C = CONFIG.lvl6;
+  const inWin = L6.phi >= Math.PI * 2 - C.winA || L6.phi <= C.winA;
+  const want = L6.jumps % 2 === 0 ? 'L' : 'R';
+  if(!inWin){ l6Miss('太早了'); return; }
+  if(side !== want){ l6Miss('出错了脚'); return; }
+  if(L6.jumped) return;
+
+  L6.jumped = true;
+  L6.jumps++;
+  L6.jumpT = 0;
+  Sfx.step();
+  Sfx.tick(true);
+  updateL6HUD();
+  if(L6.jumps >= C.jumps){ l6Win(); return; }
+  l6SetTask('好！绳子又要转过来了');
+  l6ApplyHint();
+}
+
+function l6Miss(reason){
+  if(L6.done) return;
+  L6.misses++;
+  L6.phase = 'miss'; L6.phaseT = 0;
+  L6.jumpT = 1;
+  L6.jumped = false;
+  Sfx.thud();
+  updateL6HUD();
+  l6ApplyHint();
+  l6SetTask(reason + '，等绳子到脚下再跳');
+}
+
+function l6Win(){
+  if(L6.done) return;
+  L6.done = true; L6.active = false;
+  L6.phase = 'win'; L6.phaseT = 0;
+  Sfx.win();
+  l6ApplyHint();
+  l6SetTask('🎉 8 次全跳过去了！');
+  const used = L6.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('🎉 跳完啦！',
+      '用时 <b>' + used + '</b> 秒 · 失误 <b>' + L6.misses + '</b> 次', '再跳一次');
+  }, 1500);
+}
+
+function l6Pose(dt, now){
+  const C = CONFIG.lvl6;
+  baseTargets();
+  const br = Math.sin(now * 0.0021);
+  TGT.spine.x = br * 0.02;
+  TGT.head.x = br * 0.03;
+  TGT.armL.z = 1.02 + br * 0.03;      // 双手握着绳把手
+  TGT.armR.z = -1.02 - br * 0.03;
+  TGT.legL.z = 0.05;
+  TGT.legR.z = -0.05;
+  L6.jumpY = 0;
+
+  if(L6.jumpT < 1){
+    const s = Math.sin(Math.PI * L6.jumpT);
+    L6.jumpY = s * C.jumpH;
+    TGT.legL.z = -0.50 * s;
+    TGT.legR.z = -0.50 * s;
+    TGT.armL.z += 0.22 * s;
+    TGT.armR.z -= 0.22 * s;
+    TGT.spine.x = 0.08 * s;
+  }else if(L6.phase === 'miss'){
+    const k = Math.min(1, L6.phaseT / 0.55);
+    const s = Math.sin(k * Math.PI);
+    BTGT.rz = 0.42 * s;
+    TGT.head.z = -0.2 * s;
+    TGT.legL.z = 0.18 * s;
+  }else if(L6.phase === 'win'){
+    const hop = Math.abs(Math.sin(now * 0.0052));
+    L6.jumpY = hop * 0.22;
+    TGT.armL.z = 1.55 + hop * 0.15;
+    TGT.armR.z = -1.55 - hop * 0.15;
+    TGT.head.x = -0.12;
+  }
+  if(frog) frog.root.position.set(C.x, L6.jumpY, 0);
+  applyPose(dt);
+}
+
+function l6Camera(dt){
+  camFollow(dt, CONFIG.lvl6.x + 0.75, 2.05, 1.35);
+}
+
+function updateLevel6(dt, now){
+  const C = CONFIG.lvl6;
+  L6.phaseT += dt;
+  if(L6.active && !L6.done) L6.elapsed += dt;
+
+  if(L6.jumpT < 1){
+    L6.jumpT = Math.min(1, L6.jumpT + dt / C.jumpT);
+    if(L6.jumpT >= 1 && L6.active && !L6.done) Sfx.tick(false);
+  }
+
+  if(L6.phase === 'play' && L6.active){
+    const prev = L6.phi;
+    L6.phi = (L6.phi + (Math.PI * 2 / C.period) * dt) % (Math.PI * 2);
+    if(prev < C.winA && L6.phi >= C.winA){
+      if(L6.jumped){ L6.jumped = false; }
+      else { l6Miss('绳子扫到脚了'); }
+    }
+  }else if(L6.phase === 'miss' && L6.phaseT >= C.missHold){
+    L6.phase = 'play'; L6.phaseT = 0;
+    L6.phi = Math.PI * 1.35;
+    L6.jumped = false;
+    l6SetTask('按发光的脚跳过绳子');
+    l6ApplyHint();
+  }
+
+  if(L6.rope) L6.rope.rotation.z = L6.phi;
+  if(L6.ring){
+    const inWin = L6.phase === 'play' && (L6.phi >= Math.PI * 2 - C.winA || L6.phi <= C.winA);
+    L6.ring.material.opacity += ((inWin ? 0.85 : 0) - L6.ring.material.opacity) * (1 - Math.exp(-dt * 12));
+  }
+  if(L6.phase === 'miss') L6.jumpY = 0;
+  updateL6HUD();
+  l6Pose(dt, now);
+  l6Camera(dt);
+}
+
+// ============================================================
+// 第七关：蓄力跳台阶
+//
+// 按住任意一只脚蓄力，蓄力条来回摆动；松手时如果正好卡在绿区，
+// 奶蛙就跳到下一级台阶。力气不够 / 跳过头都算失误，人留在原地。
+// 8 级台阶跳完 = 通关。
+// ============================================================
+const L7 = {
+  active: false, done: false, phase: 'play', phaseT: 0,
+  i: 0, power: 0, dir: 1, charging: false,
+  jumpT: 1, fromX: 0, toX: 0, fromY: 0, toY: 0, jumpY: 0,
+  misses: 0, elapsed: 0,
+  props: null, hud: '', task: '', bar: '',
+};
+window.__l7 = L7;
+
+function l7SetTask(t){
+  if(!t || L7.task === t) return;
+  L7.task = t;
+  if(el.l2Task) el.l2Task.textContent = t;
+}
+
+function l7UpdateBar(){
+  const C = CONFIG.lvl7;
+  const z = C.zones[Math.min(L7.i, C.steps - 1)];
+  if(el.l7Zone && z){
+    el.l7Zone.style.display = 'block';
+    el.l7Zone.style.left = (z[0] * 100).toFixed(1) + '%';
+    el.l7Zone.style.width = ((z[1] - z[0]) * 100).toFixed(1) + '%';
+  }
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.add('on');
+}
+
+function updateL7HUD(){
+  const key = L7.elapsed.toFixed(1) + '/' + L7.i + '/' + L7.misses;
+  if(key === L7.hud) return;
+  L7.hud = key;
+  if(el.l2Time) el.l2Time.textContent = L7.elapsed.toFixed(1);
+  if(el.l2Step) el.l2Step.textContent = L7.i + '/' + CONFIG.lvl7.steps;
+  if(el.l2Miss) el.l2Miss.textContent = L7.misses;
+}
+
+function buildL7Props(){
+  if(L7.props) return L7.props;
+  const C = CONFIG.lvl7;
+  const g = new THREE.Group();
+  // 8 级台阶：越往前越高，台阶之间留一点空
+  for(let i = 1; i <= C.steps; i++){
+    const top = C.stepY * i;
+    const x = C.startX + i * C.gap;
+    addBox(1.18, top + 0.22, 1.5, i % 2 ? 0xd7dde8 : 0xc6cfdf, x, (top - 0.22) / 2, 0, g);
+    addBox(1.22, 0.08, 1.54, 0xffd93d, x, top + 0.02, 0, g);   // 台面亮边
+  }
+  // 终点的旗子
+  const fx = C.startX + C.steps * C.gap;
+  addBox(0.07, 1.7, 0.07, 0x3c4a5e, fx + 0.5, C.stepY * C.steps + 0.85, 0, g);
+  addBox(0.62, 0.38, 0.03, 0xd94f4f, fx + 0.19, C.stepY * C.steps + 1.42, 0, g);
+
+  g.visible = false;
+  scene.add(g);
+  L7.props = g;
+  return g;
+}
+
+function startLevel7(){
+  const C = CONFIG.lvl7;
+  resetAllLevels();
+  L7.active = true; L7.done = false;
+  L7.phase = 'play'; L7.phaseT = 0;
+  L7.i = 0; L7.power = 0; L7.dir = 1; L7.charging = false;
+  L7.jumpT = 1; L7.jumpY = 0;
+  L7.fx = C.startX; L7.fy = 0;
+  L7.misses = 0; L7.elapsed = 0;
+  L7.hud = ''; L7.task = '';
+  buildL7Props().visible = true;
+  l7UpdateBar();
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  document.body.classList.add('level7');
+  setSky(0xbfe7ff);
+  setLabels('用时', '台阶');
+  setBtnText(el.footL, '↓', '左脚');
+  setBtnText(el.footR, '↓', '右脚');
+  setBtnText(el.btnL, '←', '左手');
+  setBtnText(el.btnR, '→', '右手');
+
+  resetFrogAt(C.startX, 0);
+  G.camX = C.startX + 1.4; G.camZ = CONFIG.cam.z; G.camY = CONFIG.cam.y;
+  l7SetTask('按住任意脚蓄力，松手卡进绿区就跳上一台');
+  updateL7HUD();
+  Sfx.init();
+}
+
+function resetL7Scene(){
+  document.body.classList.remove('level7');
+  L7.active = false; L7.done = false;
+  L7.phase = 'play'; L7.charging = false; L7.power = 0;
+  L7.jumpT = 1; L7.jumpY = 0;
+  L7.fx = CONFIG.lvl7.startX; L7.fy = 0;
+  if(L7.props) L7.props.visible = false;
+  if(el.l7Zone) el.l7Zone.style.display = 'none';
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0';
+  L7.hud = ''; L7.task = '';
+}
+
+function l7Down(){
+  if(G.level !== 7 || !L7.active || L7.done) return;
+  if(L7.phase !== 'play' || L7.jumpT < 1) return;
+  if(L7.charging) return;
+  L7.charging = true;
+  L7.dir = 1;
+  Sfx.tick(false);
+  l7SetTask('蓄力中…松手就跳');
+}
+
+function l7Up(){
+  if(G.level !== 7 || !L7.active || L7.done) return;
+  if(!L7.charging) return;
+  L7.charging = false;
+  const C = CONFIG.lvl7;
+  const z = C.zones[L7.i];
+  const p = L7.power;
+  L7.power = 0; L7.dir = 1;
+  if(!z) return;
+  if(p >= z[0] && p <= z[1]) l7Jump();
+  else l7Miss(p < z[0] ? '力气不够' : '跳过头了');
+}
+
+function l7Jump(){
+  const C = CONFIG.lvl7;
+  L7.phase = 'jump'; L7.phaseT = 0;
+  L7.jumpT = 0; L7.jumpY = 0;
+  L7.fromX = C.startX + L7.i * C.gap;
+  L7.toX = C.startX + (L7.i + 1) * C.gap;
+  L7.fromY = C.stepY * L7.i;
+  L7.toY = C.stepY * (L7.i + 1);
+  Sfx.step();
+  l7SetTask('跳！');
+}
+
+function l7Miss(reason){
+  L7.misses++;
+  L7.phase = 'miss'; L7.phaseT = 0;
+  L7.jumpT = 1; L7.jumpY = 0;
+  Sfx.thud();
+  l7SetTask(reason + '，再试一次');
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.add('on');
+  updateL7HUD();
+}
+
+function l7Win(){
+  if(L7.done) return;
+  L7.done = true; L7.active = false;
+  L7.phase = 'win'; L7.phaseT = 0;
+  Sfx.win();
+  l7SetTaskSafe('🎉 八级台阶全上来了！');
+  const used = L7.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('🚩 跳上最后一台！',
+      '用时 <b>' + used + '</b> 秒 · 失误 <b>' + L7.misses + '</b> 次', '再跳一次');
+  }, 1400);
+}
+
+function l7Pose(dt, now){
+  const C = CONFIG.lvl7;
+  baseTargets();
+  const br = Math.sin(now * 0.0021);
+  TGT.spine.x = br * 0.02;
+  TGT.head.x = br * 0.03;
+  TGT.armL.z = 0.08 + br * 0.02;
+  TGT.armR.z = -0.08 - br * 0.02;
+  TGT.legL.z = 0.04;
+  TGT.legR.z = -0.04;
+  L7.jumpY = 0;
+
+  if(L7.phase === 'play' && L7.charging){
+    const k = L7.power;
+    BTGT.y = -0.14 * k;
+    TGT.legL.z = 0.32 * k;
+    TGT.legR.z = -0.32 * k;
+    TGT.spine.x = 0.20 * k;
+    TGT.armL.z = -0.35 * k;
+    TGT.armR.z = 0.35 * k;
+  }else if(L7.phase === 'jump' && L7.jumpT < 1){
+    const s = Math.sin(Math.PI * L7.jumpT);
+    L7.jumpY = s * C.jumpH;
+    TGT.legL.z = -0.52 * s;
+    TGT.legR.z = -0.52 * s;
+    TGT.armL.z = 0.55 * s;
+    TGT.armR.z = -0.55 * s;
+  }else if(L7.phase === 'miss'){
+    const k = Math.min(1, L7.phaseT / 0.5);
+    const s = Math.sin(k * Math.PI);
+    BTGT.rz = 0.38 * s;
+    BTGT.y = 0.12 * s;
+    TGT.armL.z = 0.45 * s;
+    TGT.armR.z = -0.45 * s;
+  }else if(L7.phase === 'win'){
+    const hop = Math.abs(Math.sin(now * 0.005));
+    L7.jumpY = hop * 0.18;
+    TGT.armL.z = 1.35;
+    TGT.armR.z = -1.35;
+  }
+  if(frog) frog.root.position.set(L7.fx, L7.fy + L7.jumpY, 0);
+  applyPose(dt);
+}
+
+function l7Camera(dt){
+  camFollow(dt, (L7.fx || CONFIG.lvl7.startX) + 1.35, 2.1, 1.55);
+}
+
+function updateLevel7(dt, now){
+  const C = CONFIG.lvl7;
+  L7.phaseT += dt;
+  if(L7.active && !L7.done) L7.elapsed += dt;
+
+  if(L7.charging && L7.phase === 'play'){
+    L7.power += (dt / (L7.dir > 0 ? C.chargeUp : C.chargeDown)) * L7.dir;
+    if(L7.power >= 1){ L7.power = 1; L7.dir = -1; }
+    if(L7.power <= 0){ L7.power = 0; L7.dir = 1; }
+  }
+  if(el.l2ProgFill) el.l2ProgFill.style.width = (L7.power * 100).toFixed(1) + '%';
+
+  if(L7.phase === 'jump' && L7.jumpT < 1){
+    L7.jumpT = Math.min(1, L7.jumpT + dt / C.jumpT);
+    const t = L7.jumpT;
+    L7.fx = L7.fromX + (L7.toX - L7.fromX) * t;
+    L7.fy = L7.fromY + (L7.toY - L7.fromY) * t;
+    if(t >= 1){
+      L7.i++;
+      L7.phase = 'play'; L7.phaseT = 0;
+      L7.power = 0; L7.dir = 1;
+      Sfx.tick(true);
+      updateL7HUD();
+      if(L7.i >= C.steps){ l7Win(); }
+      else { l7UpdateBar(); l7SetTask('再来！卡进绿区跳下一台'); }
+    }
+  }else if(L7.phase === 'miss' && L7.phaseT >= C.missHold){
+    L7.phase = 'play'; L7.phaseT = 0;
+    l7SetTaskSafe();
+  }
+  updateL7HUD();
+  l7Pose(dt, now);
+  l7Camera(dt);
+}
+
+function l7SetTaskSafe(){
+  l7SetTask('按住任意脚蓄力，松手卡进绿区就跳上一台');
+}
+
+// ============================================================
+// 第八关：记节奏
+//
+// 四块踏板对应左手 / 右手 / 左脚 / 右脚。每一轮先演示一串动作
+// （踏板亮起 + 音效），然后玩家必须原样按出来。
+// 按错就重新播放这一轮，5 轮全部复现 = 通关。
+// ============================================================
+const L8 = {
+  active: false, done: false, phase: 'idle', phaseT: 0,
+  round: 0, seq: [], idx: 0, demoIdx: -1, demoT: 0,
+  misses: 0, elapsed: 0, flash: {},
+  props: null, pads: {},
+  hud: '', task: '', seqKey: '',
+};
+window.__l8 = L8;
+
+const L8_COLORS = { HL: 0xffd93d, HR: 0xff9a3d, FL: 0x3ddc84, FR: 0x2a7bd6 };
+
+function l8SetTask(t){
+  if(!t || L8.task === t) return;
+  L8.task = t;
+  if(el.l2Task) el.l2Task.textContent = t;
+}
+
+function updateL8HUD(){
+  const key = L8.elapsed.toFixed(1) + '/' + L8.round + '/' + L8.misses;
+  if(key === L8.hud) return;
+  L8.hud = key;
+  if(el.l2Time) el.l2Time.textContent = L8.elapsed.toFixed(1);
+  if(el.l2Step) el.l2Step.textContent = Math.min(CONFIG.lvl8.rounds, L8.round + (L8.active ? 1 : 0)) + '/' + CONFIG.lvl8.rounds;
+  if(el.l2Miss) el.l2Miss.textContent = L8.misses;
+}
+
+function l8RenderSeq(){
+  if(!el.l5Seq) return;
+  const now = L8.phase === 'demo' ? L8.demoIdx : (L8.phase === 'input' ? L8.idx : -1);
+  const key = L8.round + '/' + L8.seq.join('') + '/' + now + '/' + L8.phase;
+  if(key === L8.seqKey) return;
+  L8.seqKey = key;
+  el.l5Seq.innerHTML = seqBarHtml(L8.seq, L8.phase === 'input' ? L8.idx : 0, now, '→');
+}
+
+function l8Flash(code, len){
+  L8.flash[code] = len || 0.30;
+}
+
+function l8PadsUpdate(dt){
+  for(const code in L8.pads){
+    const pad = L8.pads[code];
+    const f = L8.flash[code] || 0;
+    L8.flash[code] = Math.max(0, f - dt);
+    const k = f > 0 ? 1 : 0.16;
+    if(pad.material) pad.material.emissiveIntensity = k;
+  }
+}
+
+function buildL8Props(){
+  if(L8.props) return L8.props;
+  const C = CONFIG.lvl8;
+  const g = new THREE.Group();
+  const offs = { HL: -0.95, FL: -0.32, HR: 0.32, FR: 0.95 };
+  for(const code in offs){
+    const mat = new THREE.MeshLambertMaterial({
+      color: L8_COLORS[code], emissive: L8_COLORS[code], emissiveIntensity: 0.16,
+    });
+    const pad = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.10, 0.52), mat);
+    pad.position.set(C.x + offs[code], 0.05, -0.72);
+    g.add(pad);
+    L8.pads[code] = pad;
+    // 踏板上的音筒
+    const cyl = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.13, 0.15, 0.12, 14),
+      new THREE.MeshLambertMaterial({ color: 0xf4f1e6 })
+    );
+    cyl.position.set(C.x + offs[code], 0.16, -0.72);
+    g.add(cyl);
+  }
+  // 一盏小路灯，给踏板打光
+  addBox(0.10, 2.2, 0.10, 0x3c4a5e, C.x + 1.5, 1.1, -1.1, g);
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.18, 12, 10),
+    new THREE.MeshBasicMaterial({ color: 0xffe9a8 })
+  );
+  head.position.set(C.x + 1.5, 2.2, -1.1);
+  g.add(head);
+
+  g.visible = false;
+  scene.add(g);
+  L8.props = g;
+  return g;
+}
+
+function startLevel8(){
+  const C = CONFIG.lvl8;
+  resetAllLevels();
+  L8.active = true; L8.done = false;
+  L8.round = 0; L8.misses = 0; L8.elapsed = 0;
+  L8.idx = 0; L8.seq = []; L8.demoIdx = -1; L8.demoT = 0;
+  L8.flash = {}; L8.hud = ''; L8.task = ''; L8.seqKey = '';
+  buildL8Props().visible = true;
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  document.body.classList.add('level8');
+  setSky(0xbfe7ff);
+  setLabels('用时', '轮次');
+  setBtnText(el.btnL, '←', '左手');
+  setBtnText(el.btnR, '→', '右手');
+  setBtnText(el.footL, '↓', '左脚');
+  setBtnText(el.footR, '↓', '右脚');
+
+  resetFrogAt(C.x, 0);
+  G.camX = C.x + 0.95; G.camZ = CONFIG.cam.z; G.camY = CONFIG.cam.y;
+  l8StartRound();
+  updateL8HUD();
+  Sfx.init();
+}
+
+function resetL8Scene(){
+  document.body.classList.remove('level8');
+  L8.active = false; L8.done = false;
+  L8.phase = 'idle'; L8.seq = []; L8.idx = 0; L8.demoIdx = -1;
+  L8.flash = {}; L8.hud = ''; L8.task = ''; L8.seqKey = '';
+  if(el.l5Seq) el.l5Seq.innerHTML = '';
+  if(L8.props) L8.props.visible = false;
+}
+
+function l8NewSeq(n){
+  const limbs = ['HL', 'HR', 'FL', 'FR'];
+  const out = [];
+  for(let i = 0; i < n; i++){
+    let c = limbs[Math.floor(Math.random() * limbs.length)];
+    if(i > 0 && c === out[i - 1]) c = limbs[(limbs.indexOf(c) + 1) % limbs.length];
+    out.push(c);
+  }
+  return out;
+}
+
+function l8StartRound(){
+  const C = CONFIG.lvl8;
+  L8.seq = l8NewSeq(C.lens[L8.round] || 4);
+  L8.idx = 0; L8.demoIdx = -1; L8.demoT = 0.40;
+  L8.phase = 'demo'; L8.phaseT = 0;
+  l8SetTask('看清楚：一共 ' + L8.seq.length + ' 个动作');
+  l8RenderSeq();
+  updateL8HUD();
+}
+
+function l8Press(code){
+  if(G.level !== 8 || !L8.active || L8.done) return;
+  if(L8.phase !== 'input') return;
+  l8Flash(code, 0.30);
+  if(code !== L8.seq[L8.idx]){
+    l8Miss();
+    return;
+  }
+  L8.idx++;
+  Sfx.tick(false);
+  l8RenderSeq();
+  if(L8.idx >= L8.seq.length){
+    L8.phase = 'gap'; L8.phaseT = 0;
+    Sfx.perfect();
+    l8SetTask('这一轮过了！');
+  }else{
+    l8SetTask('继续（' + L8.idx + '/' + L8.seq.length + '）');
+  }
+}
+
+function l8Miss(){
+  L8.misses++;
+  L8.phase = 'miss'; L8.phaseT = 0;
+  Sfx.thud();
+  l8SetTask('按错了，再看一遍');
+  L8.idx = 0;
+  updateL8HUD();
+  l8RenderSeq();
+}
+
+function l8CompleteRound(){
+  const C = CONFIG.lvl8;
+  L8.round++;
+  updateL8HUD();
+  if(L8.round >= C.rounds){ l8Win(); return; }
+  L8.phase = 'pause'; L8.phaseT = 0;
+  l8SetTask('第 ' + (L8.round + 1) + ' 轮准备…');
+}
+
+function l8Win(){
+  if(L8.done) return;
+  L8.done = true; L8.active = false;
+  L8.phase = 'win'; L8.phaseT = 0;
+  Sfx.win();
+  if(el.l5Seq) el.l5Seq.innerHTML = '';
+  l8SetTask('🎉 五轮节奏全记住了！');
+  const used = L8.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('🎵 节奏全对！',
+      '用时 <b>' + used + '</b> 秒 · 失误 <b>' + L8.misses + '</b> 次', '再来一轮');
+  }, 1400);
+}
+
+function l8Pose(dt, now){
+  const C = CONFIG.lvl8;
+  baseTargets();
+  const br = Math.sin(now * 0.0021);
+  TGT.spine.x = br * 0.02;
+  TGT.head.x = br * 0.03;
+  TGT.armL.z = 0.10 + br * 0.02;
+  TGT.armR.z = -0.10 - br * 0.02;
+  TGT.legL.z = 0.05;
+  TGT.legR.z = -0.05;
+  for(const code in L8.flash){
+    if(L8.flash[code] <= 0) continue;
+    const p = Math.min(1, L8.flash[code] / 0.30);
+    if(code === 'HL') TGT.armL.z += 1.0 * p;
+    else if(code === 'HR') TGT.armR.z -= 1.0 * p;
+    else if(code === 'FL'){ TGT.legL.z = -0.55 * p; TGT.legR.z = 0.10 * p; }
+    else { TGT.legR.z = -0.55 * p; TGT.legL.z = -0.10 * p; }
+  }
+  if(L8.phase === 'win'){
+    BTGT.y = Math.abs(Math.sin(now * 0.0048)) * 0.20;
+    TGT.armL.z = 1.3;
+    TGT.armR.z = -1.3;
+  }else if(L8.phase === 'miss'){
+    const k = Math.min(1, L8.phaseT / 0.5);
+    BTGT.rz = 0.35 * Math.sin(k * Math.PI);
+  }
+  if(frog) frog.root.position.set(C.x, 0, 0);
+  applyPose(dt);
+}
+
+function l8Camera(dt){
+  camFollow(dt, CONFIG.lvl8.x + 0.95, 2.05, 1.35);
+}
+
+function updateLevel8(dt, now){
+  const C = CONFIG.lvl8;
+  L8.phaseT += dt;
+  if(L8.active && !L8.done) L8.elapsed += dt;
+  l8PadsUpdate(dt);
+
+  if(L8.phase === 'demo' && L8.active){
+    L8.demoT -= dt;
+    if(L8.demoT <= 0){
+      L8.demoIdx++;
+      if(L8.demoIdx < L8.seq.length){
+        const code = L8.seq[L8.demoIdx];
+        l8Flash(code, 0.32);
+        Sfx.tick(false);
+        l8RenderSeq();
+        L8.demoT = C.demoGap;
+      }else{
+        L8.demoT = 0.55;
+        L8.phase = 'input';
+        L8.idx = 0;
+        L8.demoIdx = -1;
+        l8SetTask('轮到你了：按顺序复现');
+        l8RenderSeq();
+      }
+    }
+  }else if(L8.phase === 'miss' && L8.phaseT >= C.missHold){
+    L8.demoIdx = -1;
+    L8.demoT = 0.35;
+    L8.idx = 0;
+    L8.phase = 'demo'; L8.phaseT = 0;
+    l8SetTask('再看一遍');
+    l8RenderSeq();
+  }else if(L8.phase === 'gap' && L8.phaseT >= 0.55){
+    l8CompleteRound();
+  }else if(L8.phase === 'pause' && L8.phaseT >= C.roundGap){
+    l8StartRound();
+  }
+  updateL8HUD();
+  l8Pose(dt, now);
+  l8Camera(dt);
+}
+
+// ============================================================
+// 第九关：擦车窗
+//
+// 公交停在路边，四扇车窗糊着泥。按住下面的圆圈，顺着箭头方向画圈，
+// 画够圈数那扇窗就擦干净。四扇窗全亮 = 通关。
+// ============================================================
+const L9 = {
+  active: false, done: false, phase: 'play',
+  win: 0, turns: 0, misses: 0, elapsed: 0,
+  dragging: false, pointerId: null, lastAng: null,
+  missCool: 0, badFlash: 0,
+  props: null, windows: [], dirt: [], frame: null,
+  hud: '', task: '',
+};
+window.__l9 = L9;
+
+function l9SetTask(t){
+  if(!t || L9.task === t) return;
+  L9.task = t;
+  if(el.l2Task) el.l2Task.textContent = t;
+}
+
+function updateL9HUD(){
+  const key = L9.elapsed.toFixed(1) + '/' + L9.win + '/' + L9.misses;
+  if(key === L9.hud) return;
+  L9.hud = key;
+  if(el.l2Time) el.l2Time.textContent = L9.elapsed.toFixed(1);
+  if(el.l2Step) el.l2Step.textContent = L9.win + '/' + CONFIG.lvl9.windows;
+  if(el.l2Miss) el.l2Miss.textContent = L9.misses;
+}
+
+function l9DirtTexture(){
+  const S = 128;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const c = cv.getContext('2d');
+  c.clearRect(0, 0, S, S);
+  for(let i = 0; i < 18; i++){
+    const r = 10 + Math.random() * 26;
+    const x = Math.random() * S, y = Math.random() * S;
+    const grd = c.createRadialGradient(x, y, 0, x, y, r);
+    grd.addColorStop(0, 'rgba(120,104,86,0.72)');
+    grd.addColorStop(1, 'rgba(120,104,86,0)');
+    c.fillStyle = grd;
+    c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+  }
+  c.strokeStyle = 'rgba(96,84,70,0.35)';
+  for(let i = 0; i < 6; i++){
+    c.lineWidth = 2 + Math.random() * 4;
+    c.beginPath();
+    c.moveTo(Math.random() * S, 0);
+    c.bezierCurveTo(Math.random() * S, S / 3, Math.random() * S, S * 0.7, Math.random() * S, S);
+    c.stroke();
+  }
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+function buildL9Props(){
+  if(L9.props) return L9.props;
+  const C = CONFIG.lvl9;
+  const g = new THREE.Group();
+  const xs = [-2.25, -0.75, 0.75, 2.25];
+  // 车窗贴在公交朝向镜头的那一面：位置由包围盒算出来，不用手调
+  const bb = new THREE.Box3().setFromObject(bus.flip);
+  const zFace = bb.max.z + 0.015;
+  const yWin = bb.max.y - 0.72;
+  for(const dx of xs){
+    const glass = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.92, 0.64),
+      new THREE.MeshBasicMaterial({ color: 0xcfe7ff })
+    );
+    glass.position.set(C.busX + dx, yWin, zFace);
+    g.add(glass);
+    const dirt = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.94, 0.66),
+      new THREE.MeshBasicMaterial({ map: l9DirtTexture(), transparent: true, opacity: 0.92, depthWrite: false })
+    );
+    dirt.position.set(C.busX + dx, yWin, zFace + 0.006);
+    g.add(dirt);
+    L9.windows.push(glass);
+    L9.dirt.push(dirt);
+  }
+  // 当前正在擦的窗框
+  const frame = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.06, 0.78),
+    new THREE.MeshBasicMaterial({ color: 0xffd93d, transparent: true, opacity: 0.75, depthWrite: false })
+  );
+  frame.position.set(C.busX + xs[0], yWin, zFace + 0.012);
+  g.add(frame);
+  L9.frame = frame;
+
+  g.visible = false;
+  scene.add(g);
+  L9.props = g;
+  return g;
+}
+
+function l9SetDir(){
+  const C = CONFIG.lvl9;
+  const dir = C.dirs[Math.min(L9.win, C.dirs.length - 1)];
+  if(el.l9Lbl) el.l9Lbl.textContent = dir > 0 ? '顺时针画圈' : '逆时针画圈';
+  if(el.l9Zone) el.l9Zone.style.setProperty('--p', '0');
+  if(el.l9Ring) el.l9Ring.style.transform = dir > 0 ? 'rotate(0deg)' : 'rotate(180deg)';
+  if(L9.frame && L9.win < C.windows){
+    L9.frame.position.x = C.busX + [-2.25, -0.75, 0.75, 2.25][L9.win];
+  }
+}
+
+function startLevel9(){
+  const C = CONFIG.lvl9;
+  resetAllLevels();
+  L9.active = true; L9.done = false;
+  L9.win = 0; L9.turns = 0; L9.misses = 0; L9.elapsed = 0;
+  L9.dragging = false; L9.lastAng = null; L9.missCool = 0; L9.badFlash = 0;
+  L9.hud = ''; L9.task = '';
+  buildL9Props().visible = true;
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  document.body.classList.add('level9');
+  setSky(0xbfe7ff);
+  setLabels('用时', '车窗');
+  if(el.l9Zone) el.l9Zone.classList.add('show');
+
+  resetFrogAt(C.busX, 0);
+  G.camX = C.busX + 1.2; G.camZ = CONFIG.cam.z; G.camY = CONFIG.cam.y;
+  l9SetDir();
+  l9SetTask('按住圆圈，顺时针画圈擦第 1 扇窗');
+  updateL9HUD();
+  Sfx.init();
+}
+
+function resetL9Scene(){
+  document.body.classList.remove('level9');
+  L9.active = false; L9.done = false;
+  L9.win = 0; L9.turns = 0; L9.dragging = false; L9.lastAng = null;
+  L9.hud = ''; L9.task = '';
+  if(el.l9Zone) el.l9Zone.classList.remove('show', 'bad');
+  if(el.l9Ring) el.l9Ring.style.transform = 'rotate(0deg)';
+  if(L9.props) L9.props.visible = false;
+}
+
+function l9Down(e){
+  if(G.level !== 9 || !L9.active || L9.done) return;
+  e.preventDefault();
+  L9.dragging = true;
+  L9.pointerId = e.pointerId;
+  L9.lastAng = null;
+  if(el.l9Zone) el.l9Zone.classList.add('show');
+}
+
+function l9Move(e){
+  if(!L9.dragging || !L9.active || L9.done) return;
+  if(e.pointerId !== L9.pointerId) return;
+  const C = CONFIG.lvl9;
+  const box = el.l9Zone.getBoundingClientRect();
+  const cx = box.left + box.width / 2, cy = box.top + box.height / 2;
+  const a = Math.atan2(e.clientY - cy, e.clientX - cx);
+  if(L9.lastAng === null){ L9.lastAng = a; return; }
+  let d = a - L9.lastAng;
+  if(d > Math.PI) d -= Math.PI * 2;
+  if(d < -Math.PI) d += Math.PI * 2;
+  L9.lastAng = a;
+  if(Math.abs(d) > 0.55) return;      // 抖动/跳变忽略
+  const dir = C.dirs[Math.min(L9.win, C.dirs.length - 1)];
+  if(Math.sign(d) === dir && Math.abs(d) > 0.02){
+    L9.turns += Math.abs(d);
+    L9.badFlash = 0;
+    if(el.l9Ring) el.l9Ring.style.transform = dir > 0 ? 'rotate(0deg)' : 'rotate(180deg)';
+    if(el.l9Zone) el.l9Zone.style.setProperty('--p', Math.min(1, L9.turns / (C.turns * Math.PI * 2)).toFixed(3));
+    if(L9.turns >= C.turns * Math.PI * 2) l9CleanDone();
+  }else if(Math.abs(d) > 0.05){
+    L9.badFlash = 0.35;
+    if(el.l9Zone) el.l9Zone.classList.add('bad');
+    if(L9.missCool <= 0){
+      L9.misses++;
+      L9.missCool = C.missCool;
+      l9SetTask(dir > 0 ? '方向反了，要顺时针画' : '方向反了，要逆时针画');
+      updateL9HUD();
+    }
+  }
+}
+
+function l9Up(e){
+  if(e && e.pointerId !== undefined && e.pointerId !== L9.pointerId) return;
+  L9.dragging = false;
+  L9.lastAng = null;
+}
+
+function l9CleanDone(){
+  const C = CONFIG.lvl9;
+  L9.dirt[L9.win].material.opacity = 0;
+  L9.win++;
+  L9.turns = 0;
+  L9.lastAng = null;
+  Sfx.perfect();
+  updateL9HUD();
+  if(L9.win >= C.windows){ l9Win(); return; }
+  l9SetDir();
+  l9SetTask('擦干净了！继续擦第 ' + (L9.win + 1) + ' 扇窗');
+}
+
+function l9Win(){
+  if(L9.done) return;
+  L9.done = true; L9.active = false;
+  L9.dragging = false;
+  L9.phase = 'win';
+  Sfx.win();
+  if(el.l9Zone) el.l9Zone.classList.remove('show', 'bad');
+  l9SetTask('🎉 四扇窗全擦亮了！');
+  const used = L9.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('✨ 车窗亮晶晶！',
+      '用时 <b>' + used + '</b> 秒 · 失误 <b>' + L9.misses + '</b> 次', '再擦一遍');
+  }, 1300);
+}
+
+function l9Pose(dt, now){
+  baseTargets();
+  const br = Math.sin(now * 0.0021);
+  TGT.spine.x = br * 0.02;
+  TGT.head.x = br * 0.03;
+  TGT.armL.z = 0.08 + br * 0.02;
+  TGT.armR.z = -0.08 - br * 0.02;
+  TGT.legL.z = 0.05;
+  TGT.legR.z = -0.05;
+  if(L9.dragging){
+    // 擦窗时右手抬起来画圈
+    TGT.armR.z = -1.25;
+    TGT.armR.y = Math.sin(now * 0.008) * 0.25;
+    TGT.spine.x = 0.06;
+    TGT.head.z = Math.sin(now * 0.008) * 0.06;
+  }
+  if(L9.done){
+    BTGT.y = Math.abs(Math.sin(now * 0.005)) * 0.18;
+    TGT.armL.z = 1.3;
+    TGT.armR.z = -1.3;
+  }
+  if(frog) frog.root.position.set(CONFIG.lvl9.busX + CONFIG.lvl9.frogDX, 0, CONFIG.lvl9.frogZ);
+  applyPose(dt);
+}
+
+function l9Camera(dt){
+  camFollow(dt, CONFIG.lvl9.busX + CONFIG.lvl9.camX, CONFIG.lvl9.camHalf, 1.9);
+}
+
+function updateLevel9(dt, now){
+  const C = CONFIG.lvl9;
+  if(L9.active && !L9.done) L9.elapsed += dt;
+  if(L9.missCool > 0) L9.missCool -= dt;
+  if(L9.badFlash > 0){ L9.badFlash -= dt; if(L9.badFlash <= 0 && el.l9Zone) el.l9Zone.classList.remove('bad'); }
+
+  for(let i = 0; i < L9.dirt.length; i++){
+    const m = L9.dirt[i].material;
+    const target = i < L9.win ? 0 : 0.92;
+    m.opacity += (target - m.opacity) * (1 - Math.exp(-dt * 6));
+  }
+  if(L9.frame && L9.win < C.windows){
+    const k = 0.5 + 0.5 * Math.sin(now * 0.007);
+    L9.frame.material.opacity = 0.45 + 0.35 * k;
+    L9.frame.visible = true;
+  }else if(L9.frame){
+    L9.frame.visible = false;
+  }
+  updateL9HUD();
+  l9Pose(dt, now);
+  l9Camera(dt);
+}
+
+// ============================================================
+// 第十关：拍手跺脚
+//
+// 每一拍要「同时」按下两个部位（例如 左手 + 右脚），两只手差超过
+// 0.24 秒 / 多按了别的部位 / 整个窗口都没按完，都算失误。
+// 8 拍全对 = 通关。
+// ============================================================
+const L10 = {
+  active: false, done: false, phase: 'gap', phaseT: 0,
+  idx: 0, hits: 0, misses: 0, elapsed: 0,
+  beatT: 0, down: {}, downAt: {}, clock: 0,
+  oneDownT: 0, flash: {},
+  props: null, pads: {},
+  hud: '', task: '', seqKey: '',
+};
+window.__l10 = L10;
+
+function l10Pair(){
+  const C = CONFIG.lvl10;
+  return C.pairs[Math.min(L10.idx, C.pairs.length - 1)];
+}
+
+function l10SetTask(t){
+  if(!t || L10.task === t) return;
+  L10.task = t;
+  if(el.l2Task) el.l2Task.textContent = t;
+}
+
+function updateL10HUD(){
+  const key = L10.elapsed.toFixed(1) + '/' + L10.hits + '/' + L10.misses;
+  if(key === L10.hud) return;
+  L10.hud = key;
+  if(el.l2Time) el.l2Time.textContent = L10.elapsed.toFixed(1);
+  if(el.l2Step) el.l2Step.textContent = L10.hits + '/' + CONFIG.lvl10.beats;
+  if(el.l2Miss) el.l2Miss.textContent = L10.misses;
+}
+
+function l10RenderSeq(){
+  if(!el.l5Seq) return;
+  const pair = l10Pair();
+  const key = L10.idx + '/' + pair.join('') + '/' + L10.phase + '/' + L10.hits;
+  if(key === L10.seqKey) return;
+  L10.seqKey = key;
+  if(L10.done){ el.l5Seq.innerHTML = ''; return; }
+  el.l5Seq.innerHTML = seqBarHtml(pair, 0, -1, '+');
+}
+
+function l10ApplyHint(){
+  const pair = l10Pair();
+  const live = L10.active && !L10.done && L10.phase === 'beat';
+  for(const [code, node] of [['HL', el.btnL], ['HR', el.btnR], ['FL', el.footL], ['FR', el.footR]]){
+    if(node) node.classList.toggle('want', live && pair.indexOf(code) !== -1);
+  }
+}
+
+function l10Flash(code){
+  L10.flash[code] = 0.28;
+}
+
+function l10PadsUpdate(dt){
+  for(const code in L10.pads){
+    const f = L10.flash[code] || 0;
+    L10.flash[code] = Math.max(0, f - dt);
+    const m = L10.pads[code].material;
+    if(m) m.emissiveIntensity = f > 0 ? 1 : 0.14;
+  }
+}
+
+function buildL10Props(){
+  if(L10.props) return L10.props;
+  const C = CONFIG.lvl10;
+  const g = new THREE.Group();
+  const offs = { HL: -0.95, FL: -0.32, HR: 0.32, FR: 0.95 };
+  for(const code in offs){
+    const mat = new THREE.MeshLambertMaterial({
+      color: L8_COLORS[code], emissive: L8_COLORS[code], emissiveIntensity: 0.14,
+    });
+    const pad = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.10, 0.52), mat);
+    pad.position.set(C.x + offs[code], 0.05, -0.72);
+    g.add(pad);
+    L10.pads[code] = pad;
+  }
+  g.visible = false;
+  scene.add(g);
+  L10.props = g;
+  return g;
+}
+
+function startLevel10(){
+  const C = CONFIG.lvl10;
+  resetAllLevels();
+  L10.active = true; L10.done = false;
+  L10.idx = 0; L10.hits = 0; L10.misses = 0; L10.elapsed = 0;
+  L10.phase = 'gap'; L10.phaseT = 0; L10.beatT = 0;
+  L10.down = {}; L10.downAt = {}; L10.clock = 0; L10.oneDownT = 0;
+  L10.flash = {}; L10.hud = ''; L10.task = ''; L10.seqKey = '';
+  buildL10Props().visible = true;
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  document.body.classList.add('level10');
+  setSky(0xbfe7ff);
+  setLabels('用时', '拍数');
+  setBtnText(el.btnL, '←', '左手');
+  setBtnText(el.btnR, '→', '右手');
+  setBtnText(el.footL, '↓', '左脚');
+  setBtnText(el.footR, '↓', '右脚');
+
+  resetFrogAt(C.x, 0);
+  G.camX = C.x + 0.95; G.camZ = CONFIG.cam.z; G.camY = CONFIG.cam.y;
+  l10RenderSeq();
+  l10SetTask('两个动作要一起按，差一点点都不算');
+  updateL10HUD();
+
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.add('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+  L10.phase = 'gap'; L10.phaseT = 0.2;
+  Sfx.init();
+}
+
+function resetL10Scene(){
+  document.body.classList.remove('level10');
+  L10.active = false; L10.done = false;
+  L10.phase = 'gap'; L10.down = {}; L10.downAt = {}; L10.flash = {};
+  L10.hud = ''; L10.task = ''; L10.seqKey = '';
+  if(el.l5Seq) el.l5Seq.innerHTML = '';
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0';
+  if(L10.props) L10.props.visible = false;
+}
+
+function l10StartBeat(){
+  const C = CONFIG.lvl10;
+  L10.phase = 'beat'; L10.phaseT = 0;
+  L10.beatT = C.window;
+  L10.down = {}; L10.downAt = {};
+  L10.oneDownT = 0;
+  L10.seqKey = '';
+  l10RenderSeq();
+  l10ApplyHint();
+  l10SetTask('同时按下 ' + (l10Pair().map(c=>L5_LIMB[c]).join(' + ')));
+}
+
+function l10Down(code){
+  if(G.level !== 10 || !L10.active || L10.done) return;
+  if(code in L10.down) return;
+  L10.down[code] = true;
+  L10.downAt[code] = L10.clock;
+  l10Flash(code);
+  if(L10.phase !== 'beat') return;
+  const pair = l10Pair();
+  const extra = Object.keys(L10.down).find(k=>pair.indexOf(k) === -1);
+  if(extra){ l10Resolve(false, '多按了 ' + L5_LIMB[extra]); return; }
+  if(pair.every(k=>L10.down[k]) && Math.abs(L10.downAt[pair[0]] - L10.downAt[pair[1]]) <= CONFIG.lvl10.syncT){
+    l10Resolve(true);
+  }
+}
+
+function l10Up(code){
+  if(code in L10.down) delete L10.down[code];
+  if(code in L10.downAt) delete L10.downAt[code];
+}
+
+function l10Resolve(ok, reason){
+  const C = CONFIG.lvl10;
+  L10ApplyHintClear();
+  if(ok){
+    L10.hits++;
+    L10.idx++;
+    Sfx.perfect();
+    L10.phase = 'gap'; L10.phaseT = 0;
+    updateL10HUD();
+    if(L10.hits >= C.beats){ l10Win(); return; }
+    l10RenderSeq();
+  }else{
+    L10.misses++;
+    Sfx.thud();
+    L10.phase = 'gap'; L10.phaseT = 0;
+    updateL10HUD();
+    l10SetTask((reason || '没跟上') + '，下一拍');
+    L10.idx = Math.min(C.beats - 1, L10.idx + 1);
+    L10.seqKey = '';
+    l10RenderSeq();
+  }
+}
+
+function L10ApplyHintClear(){
+  for(const node of [el.btnL, el.btnR, el.footL, el.footR]) if(node) node.classList.remove('want');
+}
+
+function l10Win(){
+  if(L10.done) return;
+  L10.done = true; L10.active = false;
+  L10.phase = 'win'; L10.phaseT = 0;
+  Sfx.win();
+  L10ApplyHintClear();
+  if(el.l5Seq) el.l5Seq.innerHTML = '';
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+  l10SetTask('🎉 八拍全对！');
+  const used = L10.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('👏 节奏大师！',
+      '用时 <b>' + used + '</b> 秒 · 失误 <b>' + L10.misses + '</b> 次', '再来一遍');
+  }, 1400);
+}
+
+function l10Pose(dt, now){
+  const C = CONFIG.lvl10;
+  baseTargets();
+  const br = Math.sin(now * 0.0021);
+  TGT.spine.x = br * 0.02;
+  TGT.head.x = br * 0.03;
+  TGT.armL.z = 0.09 + br * 0.02;
+  TGT.armR.z = -0.09 - br * 0.02;
+  TGT.legL.z = 0.05;
+  TGT.legR.z = -0.05;
+  for(const code in L10.flash){
+    if(L10.flash[code] <= 0) continue;
+    const p = Math.min(1, L10.flash[code] / 0.28);
+    if(code === 'HL') TGT.armL.z += 1.0 * p;
+    else if(code === 'HR') TGT.armR.z -= 1.0 * p;
+    else if(code === 'FL'){ TGT.legL.z = -0.5 * p; TGT.legR.z = 0.08 * p; }
+    else { TGT.legR.z = -0.5 * p; TGT.legL.z = -0.08 * p; }
+  }
+  if(L10.phase === 'win'){
+    BTGT.y = Math.abs(Math.sin(now * 0.005)) * 0.20;
+    TGT.armL.z = 1.3;
+    TGT.armR.z = -1.3;
+  }else if(L10.phase === 'gap' && L10.phaseT < 0.2){
+    BTGT.y = 0.04;
+  }
+  if(frog) frog.root.position.set(C.x, 0, 0);
+  applyPose(dt);
+}
+
+function l10Camera(dt){
+  camFollow(dt, CONFIG.lvl10.x + 0.95, 2.05, 1.35);
+}
+
+function updateLevel10(dt, now){
+  const C = CONFIG.lvl10;
+  L10.phaseT += dt;
+  L10.clock += dt;
+  if(L10.active && !L10.done) L10.elapsed += dt;
+  l10PadsUpdate(dt);
+
+  if(L10.phase === 'beat' && L10.active){
+    L10.beatT -= dt;
+    if(el.l2ProgFill) el.l2ProgFill.style.width = Math.max(0, (L10.beatT / C.window) * 100).toFixed(1) + '%';
+    const pair = l10Pair();
+    if(pair.some(k=>L10.down[k])){
+      L10.oneDownT += dt;
+      if(L10.oneDownT > C.syncT && !pair.every(k=>L10.down[k])){
+        l10Resolve(false, '慢了半拍');
+      }
+    }
+    if(L10.beatT <= 0 && L10.phase === 'beat'){ l10Resolve(false, '没跟上'); }
+  }else{
+    if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+    if(L10.phase === 'gap' && L10.phaseT >= C.gap){
+      L10.idx = Math.min(L10.idx, C.beats - 1);
+      l10StartBeat();
+    }
+  }
+  updateL10HUD();
+  l10Pose(dt, now);
+  l10Camera(dt);
+}
+
+// ---- 各关共用的小工具 ----
+function baseTargets(){
+  TGT = {};
+  for(const k of BONES) TGT[k] = { x: 0, y: 0, z: 0 };
+  BTGT = { rz: 0, ry: 0, y: 0 };
+}
+
+function seqBarHtml(seq, doneCount, nowIdx, arrow){
+  if(!seq || !seq.length) return '';
+  return seq.map((code, i)=>{
+    let cls = 'l5chip ' + (code[0] === 'H' ? 'hand' : 'foot');
+    if(i < doneCount) cls += ' done';
+    if(i === nowIdx) cls += ' now';
+    return '<span class="' + cls + '">' + L5_LIMB[code] + '</span>';
+  }).join('<i class="l5arrow">' + arrow + '</i>');
+}
+
+function setLabels(a, b){
+  if(el.l2TimeLbl) el.l2TimeLbl.textContent = a;
+  if(el.l2StepLbl) el.l2StepLbl.textContent = b;
+  if(el.l2TimeChip) el.l2TimeChip.classList.remove('low');
+}
+
+function setBtnText(node, icon, text){
+  if(node) node.innerHTML = '<span>' + icon + '</span>' + text;
+}
+
+function resetFrogAt(x, y){
+  if(!frog) return;
+  frog.root.position.set(x, y || 0, 0);
+  frog.root.rotation.y = CONFIG.frog.yaw;
+  frog.body.rotation.set(0, 0, 0);
+  frog.body.position.set(0, 0, 0);
+  for(const k in frog.parts){
+    const p = frog.parts[k];
+    p.pose.x = p.pose.y = p.pose.z = 0;
+  }
+}
+
+function camFollow(dt, wantX, halfNeed, lookY){
+  const portrait = camera.aspect < 1.15;
+  let wantZ = CONFIG.cam.z;
+  if(portrait){
+    const hFov = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(CONFIG.cam.fov) * 0.5) * camera.aspect);
+    wantZ = THREE.MathUtils.clamp(halfNeed / Math.tan(hFov * 0.5), CONFIG.cam.z, 32);
+  }
+  G.camX += (wantX - G.camX) * (1 - Math.exp(-dt * 3));
+  G.camZ += (wantZ - G.camZ) * (1 - Math.exp(-dt * 3));
+  G.camY += (CONFIG.cam.y - G.camY) * (1 - Math.exp(-dt * 3));
+  camera.position.set(G.camX, G.camY, G.camZ);
+  camera.lookAt(G.camX, lookY || 1.45, 0);
+  scene.fog.near = Math.max(24, camera.position.z + 6);
+  scene.fog.far = scene.fog.near + 52;
+}
+
+function resetAllLevels(){
+  if(ring) ring.visible = false;
+  for(const p of pads) p.visible = false;
+  if(L2.props) L2.props.visible = false;
+  if(L3.props) L3.props.visible = false;
+  resetL4Scene();
+  resetL5Scene();
+  resetL6Scene();
+  resetL7Scene();
+  resetL8Scene();
+  resetL9Scene();
+  resetL10Scene();
+  document.body.classList.remove('level2', 'level3', 'level4', 'level5', 'level6', 'level7', 'level8', 'level9', 'level10');
+  setLabels('剩余', '台阶');
+  for(const b of [el.btnL, el.btnR, el.footL, el.footR]) if(b) b.classList.remove('want', 'drop');
+}
+
+// ============================================================
 // 每帧更新
 // ============================================================
 let lastT = performance.now();
 
 function update(dt, now){
+  if(G.level === 10){ updateLevel10(dt, now); return; }
+  if(G.level === 9){ updateLevel9(dt, now); return; }
+  if(G.level === 8){ updateLevel8(dt, now); return; }
+  if(G.level === 7){ updateLevel7(dt, now); return; }
+  if(G.level === 6){ updateLevel6(dt, now); return; }
   if(G.level === 5){ updateLevel5(dt, now); return; }
   if(G.level === 4){ updateLevel4(dt, now); return; }
   if(G.level === 3){ updateLevel3(dt, now); return; }
@@ -2679,6 +4116,37 @@ function frame(){
 addEventListener('keydown', e=>{
   if(e.repeat) return;
   const k = e.key.toLowerCase();
+  if(G.level === 10){
+    // A / D 左手右手，J / K 左脚右脚：同一拍要同时按两个
+    if(k === 'a'){ e.preventDefault(); l10Down('HL'); }
+    else if(k === 'd'){ e.preventDefault(); l10Down('HR'); }
+    else if(k === 'j'){ e.preventDefault(); l10Down('FL'); }
+    else if(k === 'k'){ e.preventDefault(); l10Down('FR'); }
+    else if(k === 'r' && L10.done) startGame(10);
+    return;
+  }
+  if(G.level === 8){
+    // A / D 手，J / K 脚，按演示顺序复现
+    if(k === 'a'){ e.preventDefault(); l8Press('HL'); }
+    else if(k === 'd'){ e.preventDefault(); l8Press('HR'); }
+    else if(k === 'j'){ e.preventDefault(); l8Press('FL'); }
+    else if(k === 'k'){ e.preventDefault(); l8Press('FR'); }
+    else if(k === 'r' && L8.done) startGame(8);
+    return;
+  }
+  if(G.level === 7){
+    // J / K 按住蓄力，松开就跳（keyup 里处理）
+    if(k === 'j' || k === 'k'){ e.preventDefault(); l7Down(); }
+    else if(k === 'r' && L7.done) startGame(7);
+    return;
+  }
+  if(G.level === 6){
+    // J / K 左右脚
+    if(k === 'j'){ e.preventDefault(); l6Press('L'); }
+    else if(k === 'k'){ e.preventDefault(); l6Press('R'); }
+    else if(k === 'r' && L6.done) startGame(6);
+    return;
+  }
   if(G.level === 5){
     // A / D 左右手，J / K 左右脚
     if(k === 'a'){ e.preventDefault(); l5Press('HL'); }
@@ -2719,6 +4187,17 @@ addEventListener('keydown', e=>{
 
 addEventListener('keyup', e=>{
   const k = e.key.toLowerCase();
+  if(G.level === 10){
+    if(k === 'a') l10Up('HL');
+    else if(k === 'd') l10Up('HR');
+    else if(k === 'j') l10Up('FL');
+    else if(k === 'k') l10Up('FR');
+    return;
+  }
+  if(G.level === 7){
+    if(k === 'j' || k === 'k') l7Up();
+    return;
+  }
   if(G.level === 4){
     if(k === 'a') l4PadUp();
     return;
@@ -2737,19 +4216,26 @@ for(const [id, side] of [['btnL', 'L'], ['btnR', 'R']]){
   const node = document.getElementById(id);
   node.addEventListener('pointerdown', e=>{
     e.preventDefault();
-    if(G.level === 5) l5Press(side === 'L' ? 'HL' : 'HR');
+    if(G.level === 10) l10Down(side === 'L' ? 'HL' : 'HR');
+    else if(G.level === 8) l8Press(side === 'L' ? 'HL' : 'HR');
+    else if(G.level === 7) l7Down();
+    else if(G.level === 5) l5Press(side === 'L' ? 'HL' : 'HR');
     else if(G.level === 4) l4PadDown();
     else if(G.level === 3) l3HandDown(side);
     else if(G.level === 2) l2PadDown(side);
-    else pressFoot(side);
+    else if(G.level === 1) pressFoot(side);
   }, { passive: false });   // 只监听 pointer 事件，避免触摸时重复触发
   node.addEventListener('pointerup', ()=>{
-    if(G.level === 4) l4PadUp();
+    if(G.level === 10) l10Up(side === 'L' ? 'HL' : 'HR');
+    else if(G.level === 7) l7Up();
+    else if(G.level === 4) l4PadUp();
     else if(G.level === 3) l3HandUp(side);
     else if(G.level === 2) l2PadUp(side);
   });
   node.addEventListener('pointercancel', ()=>{
-    if(G.level === 4) l4PadUp();
+    if(G.level === 10) l10Up(side === 'L' ? 'HL' : 'HR');
+    else if(G.level === 7) l7Up();
+    else if(G.level === 4) l4PadUp();
     else if(G.level === 3) l3HandUp(side);
     else if(G.level === 2) l2PadUp(side);
   });
@@ -2761,10 +4247,22 @@ for(const [id, side] of [['footL', 'L'], ['footR', 'R']]){
   const node = document.getElementById(id);
   node.addEventListener('pointerdown', e=>{
     e.preventDefault();
-    if(G.level === 5) l5Press(side === 'L' ? 'FL' : 'FR');
+    if(G.level === 10) l10Down(side === 'L' ? 'FL' : 'FR');
+    else if(G.level === 8) l8Press(side === 'L' ? 'FL' : 'FR');
+    else if(G.level === 7) l7Down();
+    else if(G.level === 6) l6Press(side);
+    else if(G.level === 5) l5Press(side === 'L' ? 'FL' : 'FR');
     else if(G.level === 4) l4FootTap(side);
     else if(G.level === 3) l3FootTap(side);
   }, { passive: false });
+  node.addEventListener('pointerup', ()=>{
+    if(G.level === 10) l10Up(side === 'L' ? 'FL' : 'FR');
+    else if(G.level === 7) l7Up();
+  });
+  node.addEventListener('pointercancel', ()=>{
+    if(G.level === 10) l10Up(side === 'L' ? 'FL' : 'FR');
+    else if(G.level === 7) l7Up();
+  });
   node.addEventListener('contextmenu', e=>e.preventDefault());
 }
 
@@ -2794,7 +4292,25 @@ for(const [id, side] of [['footL', 'L'], ['footR', 'R']]){
   zone.addEventListener('contextmenu', e=>e.preventDefault());
 })();
 
-// 第二关：两只手各自一个按钮，按住/松开由 pointerdown / pointerup 驱动
+// 第九关：在圆形手势区按住画圈（顺时针 / 逆时针）
+(function(){
+  const zone = document.getElementById('l9Zone');
+  if(!zone) return;
+  zone.addEventListener('pointerdown', e=>{
+    if(G.level !== 9 || !L9.active || L9.done) return;
+    try{ zone.setPointerCapture(e.pointerId); }catch(_){}
+    l9Down(e);
+  }, { passive: false });
+  zone.addEventListener('pointermove', e=>{
+    if(G.level !== 9) return;
+    l9Move(e);
+  }, { passive: false });
+  zone.addEventListener('pointerup', e=>l9Up(e));
+  zone.addEventListener('pointercancel', e=>l9Up(e));
+  zone.addEventListener('contextmenu', e=>e.preventDefault());
+})();
+
+// 主页面 / 关卡列表按钮
 el.homeBtn.addEventListener('click', ()=>showLevels());
 el.backHomeBtn.addEventListener('click', ()=>showHome());
 el.lv1.addEventListener('click', ()=>startGame(1));
@@ -2802,20 +4318,31 @@ el.lv2.addEventListener('click', ()=>startGame(2));
 el.lv3.addEventListener('click', ()=>startGame(3));
 el.lv4.addEventListener('click', ()=>startGame(4));
 el.lv5.addEventListener('click', ()=>startGame(5));
+el.lv6.addEventListener('click', ()=>startGame(6));
+el.lv7.addEventListener('click', ()=>startGame(7));
+el.lv8.addEventListener('click', ()=>startGame(8));
+el.lv9.addEventListener('click', ()=>startGame(9));
+el.lv10.addEventListener('click', ()=>startGame(10));
 el.ovBtn.addEventListener('click', ()=>startGame(G.level || 1));
 el.ovHomeBtn.addEventListener('click', ()=>showHome());
 el.homeChip.addEventListener('click', ()=>showHome());
 
 function startGame(level){
   if(!G.ready) return;      // 素材还没加载完
-  G.level = (level === 5) ? 5 : ((level === 4) ? 4 : ((level === 3) ? 3 : ((level === 2) ? 2 : 1)));
+  const lv = Math.max(1, Math.min(10, Math.round(level || 1)));
+  G.level = lv;
   G.screen = 'game';
   el.overlay.classList.remove('show');
   document.body.classList.add('ingame');
-  if(G.level === 5) startLevel5();
-  else if(G.level === 4) startLevel4();
-  else if(G.level === 3) startLevel3();
-  else if(G.level === 2) startLevel2();
+  if(lv === 10) startLevel10();
+  else if(lv === 9) startLevel9();
+  else if(lv === 8) startLevel8();
+  else if(lv === 7) startLevel7();
+  else if(lv === 6) startLevel6();
+  else if(lv === 5) startLevel5();
+  else if(lv === 4) startLevel4();
+  else if(lv === 3) startLevel3();
+  else if(lv === 2) startLevel2();
   else { setLevel1Scene(); resetGame(); }
 }
 
