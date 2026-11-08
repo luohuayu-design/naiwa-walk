@@ -186,6 +186,30 @@ const CONFIG = {
     win0: 1.25, win1: 0.80, gap: 0.55, pairSync: 0.25,
     busX: 18.0,
   },
+  // 第二十一关：躲滚球（跳过滚过来的球，共 8 个）
+  lvl21 : {
+    x: 2.0, balls: 8, speed0: 2.5, speed1: 3.3,
+    spawnX: 8.4, jumpT: 0.55, jumpH: 0.55, gap: 0.55,
+    busX: 16.0,
+  },
+  // 第二十二关：放风筝（双手把风筝稳在绿框里 12 秒）
+  lvl22 : {
+    x: 2.0, time: 12.0, center: 5.1, drift: 1.35, push: 1.9, zone: 0.52,
+    busX: 15.0,
+  },
+  // 第二十三关：过闸机（灯亮哪边，就按哪边的脚，共 8 道）
+  lvl23 : {
+    x: 2.0, gates: 8, gap: 1.15, stepT: 0.40, busX: 17.0,
+  },
+  // 第二十四关：冲刺赛跑（左右脚交替猛踩，20 步冲线）
+  lvl24 : {
+    x: 1.6, steps: 20, stepLen: 0.50, hopT: 0.16, stumble: 0.40,
+    busX: 18.0,
+  },
+  // 第二十五关：摆毕业照（同时按住指定部位，保持 1.25 秒，共 6 个姿势）
+  lvl25 : {
+    x: 2.0, poses: 6, hold: 1.25, gap: 0.65, busX: 16.0,
+  },
 };
 const BEAT_MS = 60000 / CONFIG.beat.bpm;
 
@@ -510,6 +534,11 @@ const el = {
   lv18     : document.getElementById('lv18'),
   lv19     : document.getElementById('lv19'),
   lv20     : document.getElementById('lv20'),
+  lv21     : document.getElementById('lv21'),
+  lv22     : document.getElementById('lv22'),
+  lv23     : document.getElementById('lv23'),
+  lv24     : document.getElementById('lv24'),
+  lv25     : document.getElementById('lv25'),
   l5Seq    : document.getElementById('l5Seq'),
   l7Zone   : document.getElementById('l7Zone'),
   l9Zone   : document.getElementById('l9Zone'),
@@ -6066,6 +6095,1028 @@ function updateLevel20(dt, now){
   l20Camera(dt);
 }
 
+// ============================================================
+// 第二十一关：躲滚球
+//
+// 大球从右边滚过来，按脚起跳，从球上面跳过去。
+// 跳早了会提前落地被撞到，跳晚了球已经到脚边。共 8 个球。
+// ============================================================
+const L21 = {
+  active: false, done: false, phase: 'run', phaseT: 0,
+  bx: 0, speed: 2.2, cleared: 0, misses: 0, elapsed: 0,
+  jumpT: 1, rest: 0, judged: true, flash: 0,
+  props: null, ball: null, hud: '', task: '',
+};
+window.__l21 = L21;
+
+function l21SetTask(t){
+  if(!t || L21.task === t) return;
+  L21.task = t;
+  if(el.l2Task) el.l2Task.textContent = t;
+}
+
+function updateL21HUD(){
+  const key = L21.elapsed.toFixed(1) + '/' + L21.cleared + '/' + L21.misses;
+  if(key === L21.hud) return;
+  L21.hud = key;
+  if(el.l2Time) el.l2Time.textContent = L21.elapsed.toFixed(1);
+  if(el.l2Step) el.l2Step.textContent = L21.cleared + '/' + CONFIG.lvl21.balls;
+  if(el.l2Miss) el.l2Miss.textContent = L21.misses;
+}
+
+function buildL21Props(){
+  if(L21.props) return L21.props;
+  const C = CONFIG.lvl21;
+  const g = new THREE.Group();
+  // 路边的锥桶
+  for(const bx of [C.x + 2.4, C.x + 4.6, C.x + 6.8]){
+    const cone = new THREE.Mesh(
+      new THREE.ConeGeometry(0.22, 0.55, 12),
+      new THREE.MeshLambertMaterial({ color: 0xf08a2e })
+    );
+    cone.position.set(bx, 0.28, -1.75);
+    g.add(cone);
+    const cone2 = cone.clone();
+    cone2.position.z = 1.75;
+    g.add(cone2);
+  }
+  const ball = new THREE.Group();
+  const b = new THREE.Mesh(
+    new THREE.SphereGeometry(0.34, 18, 14),
+    new THREE.MeshLambertMaterial({ color: 0x2a5fa8 })
+  );
+  ball.add(b);
+  const stripe = new THREE.Mesh(
+    new THREE.TorusGeometry(0.342, 0.030, 6, 24),
+    new THREE.MeshLambertMaterial({ color: 0x9ee0ff })
+  );
+  stripe.rotation.y = Math.PI / 2;
+  ball.add(stripe);
+  const sh = makeShadow(0.8, 0.8);
+  sh.position.y = -0.32;
+  ball.add(sh);
+  ball.position.set(C.spawnX, 0.34, 0);
+  g.add(ball);
+  L21.ball = ball;
+  g.visible = false;
+  scene.add(g);
+  L21.props = g;
+  return g;
+}
+
+function l21Spawn(){
+  const C = CONFIG.lvl21;
+  L21.bx = C.spawnX;
+  L21.judged = false;
+  L21.speed = C.speed0 + (C.speed1 - C.speed0) * (L21.cleared / Math.max(1, C.balls - 1));
+  if(L21.ball){
+    L21.ball.visible = true;
+    L21.ball.position.set(L21.bx, 0.34, 0);
+  }
+  l21SetTask('球来了，看准再跳');
+}
+
+function startLevel21(){
+  const C = CONFIG.lvl21;
+  resetAllLevels();
+  L21.active = true; L21.done = false;
+  L21.phase = 'run'; L21.phaseT = 0;
+  L21.cleared = 0; L21.misses = 0; L21.elapsed = 0;
+  L21.jumpT = 1; L21.rest = 0; L21.flash = 0;
+  L21.hud = ''; L21.task = '';
+  buildL21Props().visible = true;
+  l21Spawn();
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  document.body.classList.add('level21');
+  setSky(0xbfe1ff);
+  setLabels('用时', '躲过');
+  setBtnText(el.footL, '↑', '起跳');
+  setBtnText(el.footR, '↑', '起跳');
+  resetFrogAt(C.x, 0);
+  G.camX = C.x + 1.2; G.camZ = CONFIG.cam.z; G.camY = CONFIG.cam.y;
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.add('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+  updateL21HUD();
+  Sfx.init();
+}
+
+function resetL21Scene(){
+  document.body.classList.remove('level21');
+  L21.active = false; L21.done = false;
+  if(L21.props) L21.props.visible = false;
+  L21.hud = ''; L21.task = '';
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+}
+
+function l21Jump(){
+  if(G.level !== 21 || !L21.active || L21.done) return;
+  if(L21.jumpT < 1) return;
+  L21.jumpT = 0;
+  Sfx.step();
+}
+
+function l21Win(){
+  if(L21.done) return;
+  L21.done = true; L21.active = false;
+  Sfx.win();
+  l21SetTask('🎉 八个球全部跳过！');
+  const used = L21.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('🏐 躲球成功！',
+      '用时 <b>' + used + '</b> 秒 · 被撞 <b>' + L21.misses + '</b> 次', '再躲一次');
+  }, 1500);
+}
+
+function l21Pose(dt, now){
+  baseTargets();
+  const t = now * 0.0026;
+  TGT.spine.x = 0.06;
+  TGT.armL.z = 0.30 + Math.sin(t) * 0.12;
+  TGT.armR.z = -0.30 - Math.sin(t) * 0.12;
+  TGT.legL.z = 0.10; TGT.legR.z = -0.10;
+  if(L21.jumpT < 1){
+    const s = Math.sin(Math.PI * L21.jumpT);
+    TGT.legL.z = -0.40 * s; TGT.legR.z = -0.40 * s;
+    TGT.armL.z = 0.20 + 0.60 * s; TGT.armR.z = -0.20 - 0.60 * s;
+    TGT.spine.x = 0.10 * s;
+  }
+  if(L21.flash > 0){
+    const s = Math.sin(Math.PI * Math.min(1, L21.flash / 0.5));
+    BTGT.rz = 0.35 * s;
+  }
+  if(frog) frog.root.position.set(CONFIG.lvl21.x, L21.jumpT < 1 ? Math.sin(Math.PI * L21.jumpT) * CONFIG.lvl21.jumpH : 0, 0);
+  applyPose(dt);
+}
+
+function l21Camera(dt){
+  camFollow(dt, CONFIG.lvl21.x + 1.2, 3.6, 1.45);
+}
+
+function updateLevel21(dt, now){
+  const C = CONFIG.lvl21;
+  L21.phaseT += dt;
+  L21.flash = Math.max(0, L21.flash - dt);
+  if(L21.active && !L21.done) L21.elapsed += dt;
+
+  if(L21.rest > 0){
+    L21.rest -= dt;
+    if(L21.rest <= 0 && !L21.done) l21Spawn();
+  }else if(L21.ball && L21.ball.visible && !L21.done){
+    L21.bx -= L21.speed * dt;
+    L21.ball.position.x = L21.bx;
+    L21.ball.rotation.z -= dt * L21.speed * 1.6;
+    if(!L21.judged && L21.bx <= C.x + 0.26){
+      L21.judged = true;
+      if(L21.jumpT > 0.10 && L21.jumpT < 0.92){
+        L21.cleared++;
+        L21.flash = 0.35;
+        Sfx.perfect();
+        updateL21HUD();
+        l21SetTask('跳过去了！');
+        if(L21.cleared >= C.balls){
+          l21Win();
+        }
+      }else{
+        L21.misses++;
+        L21.flash = 0.5;
+        Sfx.thud();
+        updateL21HUD();
+        l21SetTask('被球撞到了');
+      }
+    }
+    if(L21.bx < C.x - 1.25){
+      L21.ball.visible = false;
+      L21.rest = C.gap;
+    }
+  }
+  if(L21.jumpT < 1) L21.jumpT = Math.min(1, L21.jumpT + dt / C.jumpT);
+  if(el.l2ProgFill) el.l2ProgFill.style.width = (L21.cleared / C.balls * 100).toFixed(1) + '%';
+  updateL21HUD();
+  l21Pose(dt, now);
+  l21Camera(dt);
+}
+
+// ============================================================
+// 第二十二关：放风筝
+//
+// 风筝会被风吹得左右跑，按住左手往左拉、按住右手往右拉。
+// 把风筝稳在中间绿框里 12 秒，飘出框外就记一次失误。
+// ============================================================
+const L22 = {
+  active: false, done: false, phase: 'fly', phaseT: 0,
+  kx: 0, elapsed: 0, misses: 0, outT: 0, flash: 0,
+  holdL: false, holdR: false, inZone: true,
+  props: null, kite: null, line: null, hud: '', task: '',
+};
+window.__l22 = L22;
+
+function l22SetTask(t){
+  if(!t || L22.task === t) return;
+  L22.task = t;
+  if(el.l2Task) el.l2Task.textContent = t;
+}
+
+function updateL22HUD(){
+  const C = CONFIG.lvl22;
+  const remain = Math.max(0, C.time - L22.elapsed);
+  const key = L22.elapsed.toFixed(1) + '/' + L22.misses;
+  if(key === L22.hud) return;
+  L22.hud = key;
+  if(el.l2Time) el.l2Time.textContent = L22.elapsed.toFixed(1);
+  if(el.l2Step) el.l2Step.textContent = remain.toFixed(1) + 's';
+  if(el.l2Miss) el.l2Miss.textContent = L22.misses;
+}
+
+function buildL22Props(){
+  if(L22.props) return L22.props;
+  const C = CONFIG.lvl22;
+  const g = new THREE.Group();
+  // 绿框
+  const zone = new THREE.Mesh(
+    new THREE.PlaneGeometry(C.zone * 2, 1.0),
+    new THREE.MeshBasicMaterial({ color: 0x3ddc84, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false })
+  );
+  zone.position.set(C.center, 2.9, -0.28);
+  g.add(zone);
+  addBox(0.05, 1.2, 0.05, 0x3ddc84, C.center - C.zone, 2.9, -0.30, g);
+  addBox(0.05, 1.2, 0.05, 0x3ddc84, C.center + C.zone, 2.9, -0.30, g);
+  addBox(C.zone * 2, 0.05, 0.05, 0x3ddc84, C.center, 2.32, -0.30, g);
+  addBox(C.zone * 2, 0.05, 0.05, 0x3ddc84, C.center, 3.48, -0.30, g);
+  // 风筝
+  const kite = new THREE.Group();
+  const d1 = new THREE.Mesh(
+    new THREE.BoxGeometry(0.50, 0.50, 0.035),
+    new THREE.MeshLambertMaterial({ color: 0xe8505a })
+  );
+  d1.rotation.z = Math.PI / 4;
+  kite.add(d1);
+  const d2 = new THREE.Mesh(
+    new THREE.BoxGeometry(0.30, 0.30, 0.045),
+    new THREE.MeshLambertMaterial({ color: 0xffd93d })
+  );
+  d2.rotation.z = Math.PI / 4;
+  d2.position.z = 0.02;
+  kite.add(d2);
+  for(let i = 0; i < 3; i++){
+    const tail = addBox(0.10, 0.10, 0.03, 0xffd93d, -0.16 - i * 0.12, -0.38 - i * 0.12, 0.0, kite);
+  }
+  kite.position.set(C.center, 2.9, 0.12);
+  g.add(kite);
+  L22.kite = kite;
+  // 风筝线
+  const lg = new THREE.BufferGeometry();
+  lg.setAttribute('position', new THREE.Float32BufferAttribute([C.x + 0.15, 1.25, 0.2, C.center, 2.9, 0.12], 3));
+  const line = new THREE.Line(lg, new THREE.LineBasicMaterial({ color: 0xf3f6fb }));
+  g.add(line);
+  L22.line = line;
+  g.visible = false;
+  scene.add(g);
+  L22.props = g;
+  return g;
+}
+
+function startLevel22(){
+  const C = CONFIG.lvl22;
+  resetAllLevels();
+  L22.active = true; L22.done = false;
+  L22.phase = 'fly'; L22.phaseT = 0;
+  L22.kx = C.center; L22.elapsed = 0; L22.misses = 0;
+  L22.outT = 0; L22.flash = 0; L22.holdL = false; L22.holdR = false; L22.inZone = true;
+  L22.hud = ''; L22.task = '';
+  buildL22Props().visible = true;
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  document.body.classList.add('level22');
+  setSky(0xd6ecff);
+  setLabels('用时', '稳住');
+  setBtnText(el.btnL, '←', '左手');
+  setBtnText(el.btnR, '→', '右手');
+  resetFrogAt(C.x, 0);
+  G.camX = C.x + 1.6; G.camZ = CONFIG.cam.z; G.camY = CONFIG.cam.y;
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.add('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+  l22SetTask('按住左手往左拉，右手往右拉，把风筝稳在绿框里');
+  updateL22HUD();
+  Sfx.init();
+}
+
+function resetL22Scene(){
+  document.body.classList.remove('level22');
+  L22.active = false; L22.done = false;
+  L22.holdL = false; L22.holdR = false;
+  if(L22.props) L22.props.visible = false;
+  L22.hud = ''; L22.task = '';
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+}
+
+function l22Hand(side, down){
+  if(G.level !== 22 || !L22.active || L22.done) return;
+  if(side === 'L') L22.holdL = down;
+  else L22.holdR = down;
+}
+
+function l22Win(){
+  if(L22.done) return;
+  L22.done = true; L22.active = false;
+  Sfx.win();
+  l22SetTask('🎉 风筝稳稳飞了十二秒！');
+  setTimeout(()=>{
+    showOverlay('🪁 风筝稳住啦！',
+      '失误 <b>' + L22.misses + '</b> 次 · 风筝没有飘出绿框', '再放一次');
+  }, 1500);
+}
+
+function l22Pose(dt, now){
+  baseTargets();
+  const t = now * 0.0026;
+  TGT.spine.x = 0.04;
+  TGT.head.x = -0.06;
+  TGT.armL.z = 1.20 + Math.sin(t) * 0.08 + (L22.holdL ? 0.18 : 0);
+  TGT.armR.z = -1.20 - Math.sin(t) * 0.08 - (L22.holdR ? 0.18 : 0);
+  TGT.legL.z = 0.05; TGT.legR.z = -0.05;
+  if(frog) frog.root.position.set(CONFIG.lvl22.x, 0, 0);
+  applyPose(dt);
+}
+
+function l22Camera(dt){
+  camFollow(dt, CONFIG.lvl22.x + 1.6, 3.0, 1.85);
+}
+
+function updateLevel22(dt, now){
+  const C = CONFIG.lvl22;
+  L22.phaseT += dt;
+  L22.flash = Math.max(0, L22.flash - dt);
+  if(L22.active && !L22.done){
+    L22.elapsed += dt;
+    const wind = Math.sin(now * 0.0019) * 0.55 + Math.sin(now * 0.0043) * 0.22;
+    const input = (L22.holdL ? -1 : 0) + (L22.holdR ? 1 : 0);
+    L22.kx += (wind + input * C.push) * dt;
+    L22.kx = Math.max(C.center - C.drift - 1.2, Math.min(C.center + C.drift + 1.2, L22.kx));
+    const inside = Math.abs(L22.kx - C.center) <= C.zone;
+    if(!inside && L22.inZone){
+      L22.misses++;
+      L22.flash = 0.5;
+      Sfx.thud();
+      updateL22HUD();
+      l22SetTask('风筝飘出绿框了，快拉回来');
+    }
+    L22.inZone = inside;
+    if(L22.elapsed >= C.time){ l22Win(); }
+  }
+  if(L22.kite){
+    L22.kite.position.x = L22.kx;
+    L22.kite.position.y = 2.9 + Math.sin(now * 0.0032) * 0.08;
+    L22.kite.rotation.z = Math.sin(now * 0.0022) * 0.18;
+    L22.kite.rotation.y = Math.sin(now * 0.0016) * 0.25;
+  }
+  if(L22.line){
+    const p = L22.line.geometry.attributes.position;
+    p.setXYZ(0, C.x + 0.15, 1.25, 0.2);
+    p.setXYZ(1, L22.kx, 2.9, 0.12);
+    p.needsUpdate = true;
+  }
+  if(el.l2ProgFill) el.l2ProgFill.style.width = (L22.elapsed / C.time * 100).toFixed(1) + '%';
+  updateL22HUD();
+  l22Pose(dt, now);
+  l22Camera(dt);
+}
+
+// ============================================================
+// 第二十三关：过闸机
+//
+// 每道闸机上有一盏灯：左边黄灯亮 = 按左脚，右边蓝灯亮 = 按右脚。
+// 按对闸门升起，奶蛙通过；按错会被挡回来。一共 8 道闸机。
+// ============================================================
+const L23 = {
+  active: false, done: false, phase: 'walk', phaseT: 0,
+  idx: 0, sides: [], fx: 0, fromX: 0, toX: 0, stepT: 1,
+  misses: 0, elapsed: 0, props: null, gates: [], panels: [], lamps: [],
+  hud: '', task: '', seqKey: '',
+};
+window.__l23 = L23;
+
+function l23SetTask(t){
+  if(!t || L23.task === t) return;
+  L23.task = t;
+  if(el.l2Task) el.l2Task.textContent = t;
+}
+
+function updateL23HUD(){
+  const key = L23.elapsed.toFixed(1) + '/' + L23.idx + '/' + L23.misses;
+  if(key === L23.hud) return;
+  L23.hud = key;
+  if(el.l2Time) el.l2Time.textContent = L23.elapsed.toFixed(1);
+  if(el.l2Step) el.l2Step.textContent = L23.idx + '/' + CONFIG.lvl23.gates;
+  if(el.l2Miss) el.l2Miss.textContent = L23.misses;
+}
+
+function l23RenderSeq(){
+  if(!el.l5Seq) return;
+  const key = L23.idx + '/' + L23.sides.join('');
+  if(key === L23.seqKey) return;
+  L23.seqKey = key;
+  const parts = [];
+  for(let i = L23.idx; i < Math.min(L23.sides.length, L23.idx + 5); i++){
+    let cls = 'l5chip foot';
+    if(i === L23.idx) cls += ' now';
+    parts.push('<span class="' + cls + '">' + (L23.sides[i] ? '蓝灯 · 右脚' : '黄灯 · 左脚') + '</span>');
+    if(i < Math.min(L23.sides.length, L23.idx + 5) - 1) parts.push('<i class="l5arrow">·</i>');
+  }
+  el.l5Seq.innerHTML = parts.join('');
+}
+
+function buildL23Props(){
+  if(L23.props) return L23.props;
+  const C = CONFIG.lvl23;
+  const g = new THREE.Group();
+  for(let i = 0; i < C.gates; i++){
+    const gx = C.x + (i + 1) * C.gap;
+    const gate = new THREE.Group();
+    addBox(0.09, 1.78, 0.09, 0x3c4a5e, gx, 0.89, -0.78, gate);
+    addBox(0.09, 1.78, 0.09, 0x3c4a5e, gx, 0.89, 0.78, gate);
+    addBox(0.09, 0.10, 1.65, 0x3c4a5e, gx, 1.73, 0, gate);
+    const panel = addBox(1.00, 0.92, 0.07, 0xe8505a, gx, 0.96, 0, gate);
+    addBox(1.00, 0.10, 0.10, 0xc83b48, gx, 1.42, 0, gate);
+    const lampL = new THREE.Mesh(
+      new THREE.SphereGeometry(0.11, 12, 10),
+      new THREE.MeshBasicMaterial({ color: 0x4d4420 })
+    );
+    lampL.position.set(gx - 0.56, 1.58, -0.08);
+    gate.add(lampL);
+    const lampR = new THREE.Mesh(
+      new THREE.SphereGeometry(0.11, 12, 10),
+      new THREE.MeshBasicMaterial({ color: 0x2c3646 })
+    );
+    lampR.position.set(gx + 0.56, 1.58, -0.08);
+    gate.add(lampR);
+    gate.position.x = 0;
+    g.add(gate);
+    L23.gates.push(gate);
+    L23.panels.push(panel);
+    L23.lamps.push({ L: lampL, R: lampR });
+  }
+  g.visible = false;
+  scene.add(g);
+  L23.props = g;
+  return g;
+}
+
+function l23ResetGates(){
+  for(let i = 0; i < L23.panels.length; i++){
+    L23.panels[i].position.y = 0.96;
+    L23.lamps[i].L.material.color.setHex(0x4d4420);
+    L23.lamps[i].R.material.color.setHex(0x2c3646);
+  }
+}
+
+function startLevel23(){
+  const C = CONFIG.lvl23;
+  resetAllLevels();
+  L23.active = true; L23.done = false;
+  L23.phase = 'walk'; L23.phaseT = 0;
+  L23.idx = 0; L23.misses = 0; L23.elapsed = 0;
+  L23.fx = C.x; L23.fromX = C.x; L23.toX = C.x; L23.stepT = 1;
+  L23.sides = [];
+  for(let i = 0; i < C.gates; i++){
+    let side = Math.random() < 0.5 ? 0 : 1;
+    if(i >= 2 && L23.sides[i - 1] === L23.sides[i - 2]) side = 1 - L23.sides[i - 1];
+    L23.sides.push(side);
+  }
+  L23.hud = ''; L23.task = ''; L23.seqKey = '';
+  buildL23Props().visible = true;
+  l23ResetGates();
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  document.body.classList.add('level23');
+  setSky(0xcfeaff);
+  setLabels('用时', '闸机');
+  setBtnText(el.footL, '←', '左脚');
+  setBtnText(el.footR, '→', '右脚');
+  resetFrogAt(C.x, 0);
+  G.camX = C.x + 1.4; G.camZ = CONFIG.cam.z; G.camY = CONFIG.cam.y;
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.add('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+  l23SetTask('看闸机上的灯：黄灯按左脚，蓝灯按右脚');
+  l23RenderSeq();
+  updateL23HUD();
+  Sfx.init();
+}
+
+function resetL23Scene(){
+  document.body.classList.remove('level23');
+  L23.active = false; L23.done = false;
+  if(L23.props) L23.props.visible = false;
+  L23.hud = ''; L23.task = ''; L23.seqKey = '';
+  if(el.l5Seq) el.l5Seq.innerHTML = '';
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+}
+
+function l23Miss(){
+  if(L23.done) return;
+  L23.misses++;
+  L23.phase = 'miss'; L23.phaseT = 0;
+  Sfx.thud();
+  updateL23HUD();
+  l23SetTask('按错了，灯亮哪边就按哪只脚');
+}
+
+function l23Step(side){
+  if(G.level !== 23 || !L23.active || L23.done) return;
+  const C = CONFIG.lvl23;
+  if(L23.phase !== 'walk' || L23.stepT < 1) return;
+  const want = L23.sides[L23.idx] ? 'R' : 'L';
+  if(side !== want){ l23Miss(); return; }
+  const gx = C.x + (L23.idx + 1) * C.gap;
+  L23.fromX = L23.fx;
+  L23.toX = gx + 0.30;
+  L23.stepT = 0;
+  L23.phase = 'step'; L23.phaseT = 0;
+  L23.panels[L23.idx].position.y = 1.92;
+  Sfx.step(); Sfx.tick(true);
+  l23SetTask('通过！下一道');
+}
+
+function l23Win(){
+  if(L23.done) return;
+  L23.done = true; L23.active = false;
+  Sfx.win();
+  l23SetTask('🎉 八道闸机全部通过！');
+  const used = L23.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('🚪 闸机全通过！',
+      '用时 <b>' + used + '</b> 秒 · 按错 <b>' + L23.misses + '</b> 次', '再过一次');
+  }, 1500);
+}
+
+function l23Pose(dt, now){
+  baseTargets();
+  const t = now * 0.0025;
+  TGT.spine.x = 0.05;
+  TGT.armL.z = 0.34 + Math.sin(t) * 0.10;
+  TGT.armR.z = -0.34 - Math.sin(t) * 0.10;
+  TGT.legL.z = 0.08; TGT.legR.z = -0.08;
+  if(L23.stepT < 1){
+    const s = Math.sin(Math.PI * L23.stepT);
+    TGT.legL.z = -0.28 * s; TGT.legR.z = -0.28 * s;
+    TGT.spine.x = 0.08 * s;
+  }else if(L23.phase === 'miss'){
+    const s = Math.sin(Math.PI * Math.min(1, L23.phaseT / 0.4));
+    BTGT.rz = 0.30 * s;
+  }
+  if(frog) frog.root.position.set(L23.fx, 0, 0);
+  applyPose(dt);
+}
+
+function l23Camera(dt){
+  camFollow(dt, L23.fx + 1.4, 2.6, 1.35);
+}
+
+function updateLevel23(dt, now){
+  const C = CONFIG.lvl23;
+  L23.phaseT += dt;
+  if(L23.active && !L23.done) L23.elapsed += dt;
+
+  if(L23.phase === 'step' && L23.stepT < 1){
+    L23.stepT = Math.min(1, L23.stepT + dt / C.stepT);
+    L23.fx = L23.fromX + (L23.toX - L23.fromX) * L23.stepT;
+    if(L23.stepT >= 1){
+      L23.idx++;
+      updateL23HUD();
+      l23RenderSeq();
+      if(L23.idx >= C.gates){ l23Win(); }
+      else{
+        L23.phase = 'walk'; L23.phaseT = 0;
+        l23SetTask('看下一道闸机的灯');
+      }
+    }
+  }else if(L23.phase === 'miss' && L23.phaseT >= 0.4){
+    L23.phase = 'walk'; L23.phaseT = 0;
+    l23SetTask('看闸机上的灯：黄灯按左脚，蓝灯按右脚');
+  }
+
+  for(let i = 0; i < L23.lamps.length; i++){
+    const next = i === L23.idx && !L23.done;
+    L23.lamps[i].L.material.color.setHex(next && L23.sides[i] === 0 ? 0xffd93d : 0x4d4420);
+    L23.lamps[i].R.material.color.setHex(next && L23.sides[i] === 1 ? 0x3d8bf0 : 0x2c3646);
+  }
+  if(el.l2ProgFill) el.l2ProgFill.style.width = (L23.idx / C.gates * 100).toFixed(1) + '%';
+  updateL23HUD();
+  l23Pose(dt, now);
+  l23Camera(dt);
+}
+
+// ============================================================
+// 第二十四关：冲刺赛跑
+//
+// 左右脚交替猛踩，一下一下往前冲，20 步冲过终点线。
+// 同一只脚连踩两次会绊一下，耽误时间。
+// ============================================================
+const L24 = {
+  active: false, done: false, phase: 'run', phaseT: 0,
+  n: 0, misses: 0, elapsed: 0, lastSide: '', stumbleT: 0,
+  hopT: 1, fx: 0, fromX: 0, toX: 0,
+  props: null, hud: '', task: '',
+};
+window.__l24 = L24;
+
+function l24SetTask(t){
+  if(!t || L24.task === t) return;
+  L24.task = t;
+  if(el.l2Task) el.l2Task.textContent = t;
+}
+
+function updateL24HUD(){
+  const key = L24.elapsed.toFixed(1) + '/' + L24.n + '/' + L24.misses;
+  if(key === L24.hud) return;
+  L24.hud = key;
+  if(el.l2Time) el.l2Time.textContent = L24.elapsed.toFixed(1);
+  if(el.l2Step) el.l2Step.textContent = L24.n + '/' + CONFIG.lvl24.steps;
+  if(el.l2Miss) el.l2Miss.textContent = L24.misses;
+}
+
+function buildL24Props(){
+  if(L24.props) return L24.props;
+  const C = CONFIG.lvl24;
+  const g = new THREE.Group();
+  const finish = C.x + C.steps * C.stepLen;
+  // 终点线 + 终点旗
+  for(let i = 0; i < 8; i++){
+    addBox(0.28, 0.02, 0.52, i % 2 ? 0xffffff : 0x2c3646, finish, 0.012, -1.75 + i * 0.50, g);
+  }
+  addBox(0.09, 2.2, 0.09, 0x3c4a5e, finish, 1.10, -1.90, g);
+  addBox(0.09, 2.2, 0.09, 0x3c4a5e, finish, 1.10, 1.90, g);
+  addBox(0.02, 0.62, 3.80, 0xe8505a, finish, 1.85, 0, g);
+  // 距标
+  for(let i = 2; i < C.steps; i += 3){
+    addBox(0.22, 0.02, 0.30, 0xf3f6fb, C.x + i * C.stepLen, 0.012, 1.95, g);
+  }
+  g.visible = false;
+  scene.add(g);
+  L24.props = g;
+  return g;
+}
+
+function startLevel24(){
+  const C = CONFIG.lvl24;
+  resetAllLevels();
+  L24.active = true; L24.done = false;
+  L24.phase = 'run'; L24.phaseT = 0;
+  L24.n = 0; L24.misses = 0; L24.elapsed = 0;
+  L24.lastSide = ''; L24.stumbleT = 0;
+  L24.hopT = 1; L24.fx = C.x; L24.fromX = C.x; L24.toX = C.x;
+  L24.hud = ''; L24.task = '';
+  buildL24Props().visible = true;
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  document.body.classList.add('level24');
+  setSky(0xbfe7ff);
+  setLabels('用时', '步数');
+  setBtnText(el.footL, '左', '左脚');
+  setBtnText(el.footR, '右', '右脚');
+  resetFrogAt(C.x, 0);
+  G.camX = C.x + 1.0; G.camZ = CONFIG.cam.z; G.camY = CONFIG.cam.y;
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.add('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+  l24SetTask('左右脚交替猛踩，冲向终点线！');
+  updateL24HUD();
+  Sfx.init();
+}
+
+function resetL24Scene(){
+  document.body.classList.remove('level24');
+  L24.active = false; L24.done = false;
+  if(L24.props) L24.props.visible = false;
+  L24.hud = ''; L24.task = '';
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+}
+
+function l24Step(side){
+  if(G.level !== 24 || !L24.active || L24.done) return;
+  const C = CONFIG.lvl24;
+  if(L24.stumbleT > 0 || L24.hopT < 1) return;
+  if(side === L24.lastSide){
+    L24.misses++;
+    L24.stumbleT = C.stumble;
+    Sfx.thud();
+    updateL24HUD();
+    l24SetTask('同一只脚连踩，绊了一下');
+    return;
+  }
+  L24.n++;
+  L24.lastSide = side;
+  L24.fromX = L24.fx;
+  L24.toX = C.x + L24.n * C.stepLen;
+  L24.hopT = 0;
+  Sfx.step();
+  updateL24HUD();
+  if(L24.n >= C.steps){ l24Win(); return; }
+  l24SetTask('保持交替，越快越好！');
+}
+
+function l24Win(){
+  if(L24.done) return;
+  L24.done = true; L24.active = false;
+  Sfx.win();
+  l24SetTask('🎉 冲过终点线！');
+  const used = L24.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('🏁 冲刺完成！',
+      '用时 <b>' + used + '</b> 秒 · 绊倒 <b>' + L24.misses + '</b> 次', '再跑一次');
+  }, 1500);
+}
+
+function l24Pose(dt, now){
+  baseTargets();
+  const t = now * 0.006;
+  TGT.spine.x = 0.12;
+  TGT.head.x = -0.06;
+  TGT.armL.z = 0.45 + Math.sin(t) * 0.30;
+  TGT.armR.z = -0.45 - Math.sin(t) * 0.30;
+  TGT.legL.z = 0.30 + Math.sin(t) * 0.28;
+  TGT.legR.z = -0.30 - Math.sin(t) * 0.28;
+  if(L24.stumbleT > 0){
+    const s = Math.sin(Math.PI * Math.min(1, L24.stumbleT / CONFIG.lvl24.stumble));
+    BTGT.rz = 0.42 * s;
+    TGT.spine.x = 0.30 * s + 0.10;
+  }
+  if(frog) frog.root.position.set(L24.fx, L24.hopT < 1 ? Math.sin(Math.PI * L24.hopT) * 0.12 : 0, 0);
+  applyPose(dt);
+}
+
+function l24Camera(dt){
+  camFollow(dt, L24.fx + 1.05, 2.5, 1.30);
+}
+
+function updateLevel24(dt, now){
+  const C = CONFIG.lvl24;
+  L24.phaseT += dt;
+  if(L24.active && !L24.done) L24.elapsed += dt;
+  L24.stumbleT = Math.max(0, L24.stumbleT - dt);
+  if(L24.hopT < 1){
+    L24.hopT = Math.min(1, L24.hopT + dt / C.hopT);
+    L24.fx = L24.fromX + (L24.toX - L24.fromX) * L24.hopT;
+  }
+  if(el.l2ProgFill) el.l2ProgFill.style.width = (L24.n / C.steps * 100).toFixed(1) + '%';
+  updateL24HUD();
+  l24Pose(dt, now);
+  l24Camera(dt);
+}
+
+// ============================================================
+// 第二十五关：摆毕业照
+//
+// 摄影师喊出姿势：同时按住指定的两三个部位，坚持 1.25 秒。
+// 一共 6 个姿势，全部摆对就能拍毕业照。
+// ============================================================
+const L25 = {
+  active: false, done: false, phase: 'hold', phaseT: 0,
+  poseIdx: 0, percent: 0, held: {}, misses: 0, elapsed: 0,
+  gapT: 0, flash: {}, props: null, pads: {},
+  hud: '', task: '', seqKey: '',
+};
+window.__L25 = L25;
+window.__l25 = L25;
+
+const L25_POSES = [
+  ['HL', 'HR'],
+  ['FL', 'FR'],
+  ['HL', 'FL'],
+  ['HR', 'FR'],
+  ['HL', 'HR', 'FL'],
+  ['HL', 'HR', 'FL', 'FR'],
+];
+
+function l25SetTask(t){
+  if(!t || L25.task === t) return;
+  L25.task = t;
+  if(el.l2Task) el.l2Task.textContent = t;
+}
+
+function updateL25HUD(){
+  const key = L25.elapsed.toFixed(1) + '/' + L25.poseIdx + '/' + L25.misses;
+  if(key === L25.hud) return;
+  L25.hud = key;
+  if(el.l2Time) el.l2Time.textContent = L25.elapsed.toFixed(1);
+  if(el.l2Step) el.l2Step.textContent = L25.poseIdx + '/' + CONFIG.lvl25.poses;
+  if(el.l2Miss) el.l2Miss.textContent = L25.misses;
+}
+
+function l25RenderSeq(){
+  if(!el.l5Seq) return;
+  const pose = L25_POSES[Math.min(L25.poseIdx, L25_POSES.length - 1)];
+  const key = L25.poseIdx + '/' + pose.join('');
+  if(key === L25.seqKey) return;
+  L25.seqKey = key;
+  el.l5Seq.innerHTML = pose.map((code)=>{
+    const on = L25.held[code] ? ' now' : '';
+    return '<span class="l5chip ' + (code[0] === 'H' ? 'hand' : 'foot') + on + '">' + L5_LIMB[code] + '</span>';
+  }).join('<i class="l5arrow">＋</i>');
+}
+
+function buildL25Props(){
+  if(L25.props) return L25.props;
+  const C = CONFIG.lvl25;
+  const g = new THREE.Group();
+  const offs = { HL: -1.30, FL: -0.45, HR: 0.45, FR: 1.30 };
+  for(const code in offs){
+    const mat = new THREE.MeshLambertMaterial({ color: L8_COLORS[code], emissive: L8_COLORS[code], emissiveIntensity: 0.10 });
+    const pad = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.10, 0.52), mat);
+    pad.position.set(C.x + offs[code], 0.05, -0.80);
+    g.add(pad);
+    L25.pads[code] = pad;
+    L25.flash[code] = 0;
+  }
+  // 领奖台 + 相机
+  addBox(1.10, 0.24, 0.60, 0xbfc7d2, C.x + 1.95, 0.12, -1.25, g);
+  addBox(0.70, 0.24, 0.60, 0xc89b63, C.x + 1.35, 0.24, -1.25, g);
+  addBox(0.70, 0.24, 0.60, 0xc89b63, C.x + 2.55, 0.24, -1.25, g);
+  addBox(0.09, 0.90, 0.09, 0x3c4a5e, C.x + 3.10, 0.45, -1.55, g);
+  addBox(0.34, 0.24, 0.24, 0x2c3646, C.x + 3.10, 1.00, -1.55, g);
+  g.visible = false;
+  scene.add(g);
+  L25.props = g;
+  return g;
+}
+
+function l25Pick(){
+  const C = CONFIG.lvl25;
+  L25.percent = 0; L25.phase = 'hold'; L25.phaseT = 0;
+  L25.held = {};
+  for(const code in L25.flash) L25.flash[code] = 0;
+  L25.seqKey = '';
+  const pose = L25_POSES[L25.poseIdx];
+  l25SetTask('姿势 ' + (L25.poseIdx + 1) + '：同时按住 ' + pose.map(c=>L5_LIMB[c]).join(' + '));
+  l25RenderSeq();
+}
+
+function startLevel25(){
+  const C = CONFIG.lvl25;
+  resetAllLevels();
+  L25.active = true; L25.done = false;
+  L25.phase = 'hold'; L25.phaseT = 0;
+  L25.poseIdx = 0; L25.percent = 0; L25.held = {};
+  L25.misses = 0; L25.elapsed = 0; L25.gapT = 0;
+  L25.hud = ''; L25.task = ''; L25.seqKey = '';
+  buildL25Props().visible = true;
+  for(const code in L25.pads) L25.pads[code].material.emissiveIntensity = 0.10;
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  document.body.classList.add('level25');
+  setSky(0xd6ecff);
+  setLabels('用时', '姿势');
+  setBtnText(el.btnL, '←', '左手');
+  setBtnText(el.btnR, '→', '右手');
+  setBtnText(el.footL, '↓', '左脚');
+  setBtnText(el.footR, '↓', '右脚');
+  resetFrogAt(C.x, 0);
+  G.camX = C.x + 1.0; G.camZ = CONFIG.cam.z; G.camY = CONFIG.cam.y;
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.add('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+  l25Pick();
+  updateL25HUD();
+  Sfx.init();
+}
+
+function resetL25Scene(){
+  document.body.classList.remove('level25');
+  L25.active = false; L25.done = false;
+  L25.held = {}; L25.percent = 0;
+  if(L25.props) L25.props.visible = false;
+  for(const code in L25.flash) L25.flash[code] = 0;
+  L25.hud = ''; L25.task = ''; L25.seqKey = '';
+  if(el.l5Seq) el.l5Seq.innerHTML = '';
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+}
+
+function l25RequiredHeld(){
+  const pose = L25_POSES[L25.poseIdx];
+  if(!pose) return false;
+  for(const code of pose) if(!L25.held[code]) return false;
+  return true;
+}
+
+function l25Down(code){
+  if(G.level !== 25 || !L25.active || L25.done) return;
+  if(L25.phase === 'gap') return;
+  L25.held[code] = true;
+  L25.flash[code] = 0.30;
+  const pose = L25_POSES[L25.poseIdx];
+  if(!pose || !pose.includes(code)){
+    L25.misses++;
+    L25.percent = 0;
+    Sfx.thud();
+    updateL25HUD();
+    l25SetTask('按错部位了，这个姿势重来');
+    l25RenderSeq();
+    return;
+  }
+  if(l25RequiredHeld()){
+    L25.phase = 'holding';
+    l25SetTask('保持住，别松手！');
+  }
+  l25RenderSeq();
+}
+
+function l25Up(code){
+  if(G.level !== 25 || !L25.active || L25.done) return;
+  L25.held[code] = false;
+  if(L25.phase === 'holding') L25.phase = 'hold';
+  if(L25.phase === 'hold' && L25.percent > 0) l25SetTask('松手了，快按住继续');
+  l25RenderSeq();
+}
+
+function l25Win(){
+  if(L25.done) return;
+  L25.done = true; L25.active = false;
+  Sfx.win();
+  l25SetTask('📸 毕业照拍好啦！');
+  const used = L25.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('📸 毕业照完成！',
+      '用时 <b>' + used + '</b> 秒 · 按错 <b>' + L25.misses + '</b> 次', '再摆一次');
+  }, 1500);
+}
+
+function l25Pose(dt, now){
+  baseTargets();
+  const t = now * 0.0024;
+  TGT.spine.x = 0.03;
+  TGT.head.x = -0.04;
+  TGT.armL.z = 0.22 + Math.sin(t) * 0.06;
+  TGT.armR.z = -0.22 - Math.sin(t) * 0.06;
+  TGT.legL.z = 0.05; TGT.legR.z = -0.05;
+  for(const code in L25.flash){
+    const f = L25.flash[code] || 0;
+    if(f <= 0) continue;
+    const s = Math.sin(Math.PI * Math.min(1, f / 0.30));
+    if(code === 'HL') TGT.armL.z += 0.80 * s;
+    else if(code === 'HR') TGT.armR.z -= 0.80 * s;
+    else if(code === 'FL') TGT.legL.z += 0.40 * s;
+    else if(code === 'FR') TGT.legR.z -= 0.40 * s;
+  }
+  if(frog) frog.root.position.set(CONFIG.lvl25.x, 0, 0);
+  applyPose(dt);
+}
+
+function l25Camera(dt){
+  camFollow(dt, CONFIG.lvl25.x + 1.15, 2.5, 1.35);
+}
+
+function updateLevel25(dt, now){
+  const C = CONFIG.lvl25;
+  L25.phaseT += dt;
+  if(L25.active && !L25.done) L25.elapsed += dt;
+
+  for(const code in L25.pads){
+    const f = Math.max(0, (L25.flash[code] || 0) - dt);
+    L25.flash[code] = f;
+    if(f > 0) L25.pads[code].material.emissiveIntensity = 1.0;
+    else L25.pads[code].material.emissiveIntensity = (L25.held[code] ? 0.55 : 0.10);
+  }
+
+  if(L25.active && !L25.done){
+    if(L25.phase === 'gap'){
+      L25.gapT += dt;
+      if(L25.gapT >= C.gap){
+        L25.gapT = 0;
+        l25Pick();
+      }
+    }else{
+      const all = l25RequiredHeld();
+      if(all){
+        if(L25.phase !== 'holding') L25.phase = 'holding';
+        L25.percent = Math.min(1, L25.percent + dt / C.hold);
+      }else if(L25.phase === 'holding'){
+        L25.phase = 'hold';
+      }
+      if(!all && L25.percent > 0) L25.percent = Math.max(0, L25.percent - dt * 0.10);
+      if(L25.percent >= 1){
+        L25.poseIdx++;
+        L25.percent = 0;
+        L25.held = {};
+        Sfx.perfect();
+        updateL25HUD();
+        l25RenderSeq();
+        if(L25.poseIdx >= C.poses){ l25Win(); }
+        else{
+          L25.phase = 'gap'; L25.gapT = 0;
+          l25SetTask('这个姿势过关！准备下一个');
+        }
+      }
+    }
+  }
+  if(el.l2ProgFill) el.l2ProgFill.style.width = (L25.percent * 100).toFixed(1) + '%';
+  updateL25HUD();
+  l25Pose(dt, now);
+  l25Camera(dt);
+}
+
 // ---- 各关共用的小工具 ----
 function baseTargets(){
   TGT = {};
@@ -6143,9 +7194,14 @@ function resetAllLevels(){
   resetL18Scene();
   resetL19Scene();
   resetL20Scene();
+  resetL21Scene();
+  resetL22Scene();
+  resetL23Scene();
+  resetL24Scene();
+  resetL25Scene();
   if(el.l7Zone) el.l7Zone.style.display = 'none';
   if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
-  document.body.classList.remove('level2', 'level3', 'level4', 'level5', 'level6', 'level7', 'level8', 'level9', 'level10', 'level11', 'level12', 'level13', 'level14', 'level15', 'level16', 'level17', 'level18', 'level19', 'level20');
+  document.body.classList.remove('level2', 'level3', 'level4', 'level5', 'level6', 'level7', 'level8', 'level9', 'level10', 'level11', 'level12', 'level13', 'level14', 'level15', 'level16', 'level17', 'level18', 'level19', 'level20', 'level21', 'level22', 'level23', 'level24', 'level25');
   setLabels('剩余', '台阶');
   for(const b of [el.btnL, el.btnR, el.footL, el.footR]) if(b) b.classList.remove('want', 'drop');
 }
@@ -6156,6 +7212,11 @@ function resetAllLevels(){
 let lastT = performance.now();
 
 function update(dt, now){
+  if(G.level === 25){ updateLevel25(dt, now); return; }
+  if(G.level === 24){ updateLevel24(dt, now); return; }
+  if(G.level === 23){ updateLevel23(dt, now); return; }
+  if(G.level === 22){ updateLevel22(dt, now); return; }
+  if(G.level === 21){ updateLevel21(dt, now); return; }
   if(G.level === 20){ updateLevel20(dt, now); return; }
   if(G.level === 19){ updateLevel19(dt, now); return; }
   if(G.level === 18){ updateLevel18(dt, now); return; }
@@ -6336,6 +7397,42 @@ function frame(){
 addEventListener('keydown', e=>{
   if(e.repeat) return;
   const k = e.key.toLowerCase();
+  if(G.level === 25){
+    // 四个部位都可以按
+    if(k === 'a'){ e.preventDefault(); l25Down('HL'); }
+    else if(k === 'd'){ e.preventDefault(); l25Down('HR'); }
+    else if(k === 'j'){ e.preventDefault(); l25Down('FL'); }
+    else if(k === 'k'){ e.preventDefault(); l25Down('FR'); }
+    else if(k === 'r' && L25.done) startGame(25);
+    return;
+  }
+  if(G.level === 24){
+    // J / K 左右脚交替冲刺
+    if(k === 'j'){ e.preventDefault(); l24Step('L'); }
+    else if(k === 'k'){ e.preventDefault(); l24Step('R'); }
+    else if(k === 'r' && L24.done) startGame(24);
+    return;
+  }
+  if(G.level === 23){
+    // J / K 左右脚选择闸机
+    if(k === 'j'){ e.preventDefault(); l23Step('L'); }
+    else if(k === 'k'){ e.preventDefault(); l23Step('R'); }
+    else if(k === 'r' && L23.done) startGame(23);
+    return;
+  }
+  if(G.level === 22){
+    // A / D 按住左右手拉风筝
+    if(k === 'a'){ e.preventDefault(); l22Hand('L', true); }
+    else if(k === 'd'){ e.preventDefault(); l22Hand('R', true); }
+    else if(k === 'r' && L22.done) startGame(22);
+    return;
+  }
+  if(G.level === 21){
+    // J / K 都能起跳
+    if(k === 'j' || k === 'k'){ e.preventDefault(); l21Jump(); }
+    else if(k === 'r' && L21.done) startGame(21);
+    return;
+  }
   if(G.level === 20){
     // A / D 手，J / K 脚
     if(k === 'a'){ e.preventDefault(); l20Press('HL'); }
@@ -6478,6 +7575,18 @@ addEventListener('keydown', e=>{
 
 addEventListener('keyup', e=>{
   const k = e.key.toLowerCase();
+  if(G.level === 25){
+    if(k === 'a') l25Up('HL');
+    else if(k === 'd') l25Up('HR');
+    else if(k === 'j') l25Up('FL');
+    else if(k === 'k') l25Up('FR');
+    return;
+  }
+  if(G.level === 22){
+    if(k === 'a') l22Hand('L', false);
+    else if(k === 'd') l22Hand('R', false);
+    return;
+  }
   if(G.level === 19){
     if(k === 'j' || k === 'k') l19Up();
     return;
@@ -6516,7 +7625,9 @@ for(const [id, side] of [['btnL', 'L'], ['btnR', 'R']]){
   const node = document.getElementById(id);
   node.addEventListener('pointerdown', e=>{
     e.preventDefault();
-    if(G.level === 20) l20Press(side === 'L' ? 'HL' : 'HR');
+    if(G.level === 25) l25Down(side === 'L' ? 'HL' : 'HR');
+    else if(G.level === 22) l22Hand(side, true);
+    else if(G.level === 20) l20Press(side === 'L' ? 'HL' : 'HR');
     else if(G.level === 18) l18Hand(side);
     else if(G.level === 15) l15Hand(side, true);
     else if(G.level === 11) l11Press(side === 'L' ? 'HL' : 'HR');
@@ -6530,7 +7641,9 @@ for(const [id, side] of [['btnL', 'L'], ['btnR', 'R']]){
     else if(G.level === 1) pressFoot(side);
   }, { passive: false });   // 只监听 pointer 事件，避免触摸时重复触发
   node.addEventListener('pointerup', ()=>{
-    if(G.level === 15) l15Hand(side, false);
+    if(G.level === 25) l25Up(side === 'L' ? 'HL' : 'HR');
+    else if(G.level === 22) l22Hand(side, false);
+    else if(G.level === 15) l15Hand(side, false);
     else if(G.level === 10) l10Up(side === 'L' ? 'HL' : 'HR');
     else if(G.level === 7) l7Up();
     else if(G.level === 4) l4PadUp();
@@ -6538,7 +7651,9 @@ for(const [id, side] of [['btnL', 'L'], ['btnR', 'R']]){
     else if(G.level === 2) l2PadUp(side);
   });
   node.addEventListener('pointercancel', ()=>{
-    if(G.level === 15) l15Hand(side, false);
+    if(G.level === 25) l25Up(side === 'L' ? 'HL' : 'HR');
+    else if(G.level === 22) l22Hand(side, false);
+    else if(G.level === 15) l15Hand(side, false);
     else if(G.level === 10) l10Up(side === 'L' ? 'HL' : 'HR');
     else if(G.level === 7) l7Up();
     else if(G.level === 4) l4PadUp();
@@ -6553,7 +7668,11 @@ for(const [id, side] of [['footL', 'L'], ['footR', 'R']]){
   const node = document.getElementById(id);
   node.addEventListener('pointerdown', e=>{
     e.preventDefault();
-    if(G.level === 20) l20Press(side === 'L' ? 'FL' : 'FR');
+    if(G.level === 25) l25Down(side === 'L' ? 'FL' : 'FR');
+    else if(G.level === 24) l24Step(side);
+    else if(G.level === 23) l23Step(side);
+    else if(G.level === 21) l21Jump();
+    else if(G.level === 20) l20Press(side === 'L' ? 'FL' : 'FR');
     else if(G.level === 19) l19Down();
     else if(G.level === 17) l17Jump(side);
     else if(G.level === 16) l16Step(side);
@@ -6570,12 +7689,14 @@ for(const [id, side] of [['footL', 'L'], ['footR', 'R']]){
     else if(G.level === 3) l3FootTap(side);
   }, { passive: false });
   node.addEventListener('pointerup', ()=>{
-    if(G.level === 19) l19Up();
+    if(G.level === 25) l25Up(side === 'L' ? 'FL' : 'FR');
+    else if(G.level === 19) l19Up();
     else if(G.level === 10) l10Up(side === 'L' ? 'FL' : 'FR');
     else if(G.level === 7) l7Up();
   });
   node.addEventListener('pointercancel', ()=>{
-    if(G.level === 19) l19Up();
+    if(G.level === 25) l25Up(side === 'L' ? 'FL' : 'FR');
+    else if(G.level === 19) l19Up();
     else if(G.level === 10) l10Up(side === 'L' ? 'FL' : 'FR');
     else if(G.level === 7) l7Up();
   });
@@ -6649,18 +7770,28 @@ el.lv17.addEventListener('click', ()=>startGame(17));
 el.lv18.addEventListener('click', ()=>startGame(18));
 el.lv19.addEventListener('click', ()=>startGame(19));
 el.lv20.addEventListener('click', ()=>startGame(20));
+el.lv21.addEventListener('click', ()=>startGame(21));
+el.lv22.addEventListener('click', ()=>startGame(22));
+el.lv23.addEventListener('click', ()=>startGame(23));
+el.lv24.addEventListener('click', ()=>startGame(24));
+el.lv25.addEventListener('click', ()=>startGame(25));
 el.ovBtn.addEventListener('click', ()=>startGame(G.level || 1));
 el.ovHomeBtn.addEventListener('click', ()=>showHome());
 el.homeChip.addEventListener('click', ()=>showHome());
 
 function startGame(level){
   if(!G.ready) return;      // 素材还没加载完
-  const lv = Math.max(1, Math.min(20, Math.round(level || 1)));
+  const lv = Math.max(1, Math.min(25, Math.round(level || 1)));
   G.level = lv;
   G.screen = 'game';
   el.overlay.classList.remove('show');
   document.body.classList.add('ingame');
-  if(lv === 20) startLevel20();
+  if(lv === 25) startLevel25();
+  else if(lv === 24) startLevel24();
+  else if(lv === 23) startLevel23();
+  else if(lv === 22) startLevel22();
+  else if(lv === 21) startLevel21();
+  else if(lv === 20) startLevel20();
   else if(lv === 19) startLevel19();
   else if(lv === 18) startLevel18();
   else if(lv === 17) startLevel17();

@@ -340,6 +340,55 @@
     body.level17 #l5Seq .l5arrow,body.level20 #l5Seq .l5arrow{font-size:10px}
   }
 
+  /* ---------- 第二十一 ~ 二十五关 ---------- */
+  body.level21 #hud2,body.level22 #hud2,body.level23 #hud2,
+  body.level24 #hud2,body.level25 #hud2{display:block}
+  body.level21 .top,body.level21 #hint,
+  body.level22 .top,body.level22 #hint,
+  body.level23 .top,body.level23 #hint,
+  body.level24 .top,body.level24 #hint,
+  body.level25 .top,body.level25 #hint{display:none}
+
+  /* 第二十一 / 二十三 / 二十四关：只用脚 */
+  body.level21 #btnL,body.level21 #btnR,
+  body.level23 #btnL,body.level23 #btnR,
+  body.level24 #btnL,body.level24 #btnR{display:none}
+  body.level21 .pad.foot,body.level23 .pad.foot,body.level24 .pad.foot{display:flex;
+    width:clamp(76px,15vmin,112px);height:clamp(76px,15vmin,112px);
+    font-size:clamp(15px,3.6vmin,22px)}
+  body.level21 #footL,body.level23 #footL,body.level24 #footL{left:calc(18px + env(safe-area-inset-left))}
+  body.level21 #footR,body.level23 #footR,body.level24 #footR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 第二十二关：只用手 */
+  body.level22 .pad.foot{display:none}
+  body.level22 .pad{display:flex;width:clamp(76px,15vmin,112px);height:clamp(76px,15vmin,112px);
+    font-size:clamp(15px,3.6vmin,22px)}
+  body.level22 #btnL{left:calc(18px + env(safe-area-inset-left))}
+  body.level22 #btnR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 第二十五关：四个按钮 */
+  body.level25 .pad.foot{display:flex}
+  body.level25 .pad{width:clamp(66px,13vmin,96px);height:clamp(66px,13vmin,96px);
+    font-size:clamp(13px,3vmin,18px)}
+  body.level25 #btnL{left:calc(18px + env(safe-area-inset-left));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level25 #btnR{right:calc(18px + env(safe-area-inset-right));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level25 #footL{left:calc(18px + env(safe-area-inset-left))}
+  body.level25 #footR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 第二十三 / 二十五关底部提示条 */
+  body.level23 #l5Seq{display:flex}
+  body.level25 #l5Seq{display:flex}
+  @media (orientation:portrait){
+    body.level23 #l5Seq,body.level25 #l5Seq{
+      max-width:94vw;flex-wrap:nowrap;overflow-x:auto;
+      bottom:calc(18px + 2 * clamp(66px,13vmin,96px) + 28px + env(safe-area-inset-bottom));
+    }
+    body.level23 #l5Seq .l5chip,body.level25 #l5Seq .l5chip{padding:4px 6px;font-size:11px}
+    body.level23 #l5Seq .l5arrow,body.level25 #l5Seq .l5arrow{font-size:10px}
+  }
+
   /* 第七关：蓄力条里的绿区 */
   #l7Zone{position:absolute;top:0;bottom:0;left:0;width:0;display:none;
     background:rgba(61,220,132,.55);box-shadow:0 0 10px rgba(61,220,132,.85)}
@@ -480,7 +529,7 @@
   <!-- 关卡列表 -->
   <div class="panel" id="panelLevels" hidden>
     <h1>选择关卡</h1>
-    <div class="sub">目前开放 20 关</div>
+    <div class="sub">目前开放 25 关</div>
     <div class="lvlist">
       <div class="lv" id="lv1">
         <div class="lvno">第一关</div>
@@ -639,6 +688,46 @@
         <div class="lvmeta">
           <div class="lvname">奶蛙毕业大挑战</div>
           <div class="lvdesc">12 轮混合题：单按、同时按、两连按，限时全部通过就毕业</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv21">
+        <div class="lvno">第二十一关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙躲滚球</div>
+          <div class="lvdesc">大球从右边滚过来，看准时机按脚起跳，连躲 8 个</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv22">
+        <div class="lvno">第二十二关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙放风筝</div>
+          <div class="lvdesc">按住左右手把风筝拉在绿框里，稳稳撑住 12 秒</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv23">
+        <div class="lvno">第二十三关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙过闸机</div>
+          <div class="lvdesc">黄灯亮按左脚、蓝灯亮按右脚，连过 8 道闸机</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv24">
+        <div class="lvno">第二十四关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙冲刺赛跑</div>
+          <div class="lvdesc">左右脚交替猛踩，20 步冲过终点线，连踩同一只脚会绊倒</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv25">
+        <div class="lvno">第二十五关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙摆毕业照</div>
+          <div class="lvdesc">按摄影师的要求同时按住手脚，保持 1.25 秒，摆完 6 个姿势</div>
         </div>
         <div class="lvgo">开始</div>
       </div>
