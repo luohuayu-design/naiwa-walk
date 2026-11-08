@@ -44,11 +44,19 @@
     color:#2a3550;font-weight:900;font-size:clamp(15px,3.6vmin,22px);
     display:flex;flex-direction:column;align-items:center;justify-content:center;
     box-shadow:0 8px 0 #c1900f,0 12px 24px rgba(0,20,50,.32);
-    touch-action:none;cursor:pointer;transition:transform .06s,box-shadow .06s}
+    touch-action:none;cursor:pointer;pointer-events:auto;
+    transition:transform .06s,box-shadow .06s}
   .pad span{font-size:clamp(19px,4.6vmin,28px);line-height:1}
   .pad:active{transform:translateY(6px) scale(.97);box-shadow:0 2px 0 #c1900f,0 6px 14px rgba(0,20,50,.3)}
   #btnL{left:calc(18px + env(safe-area-inset-left))}
   #btnR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 竖屏轻提示：能玩，但横屏更好 */
+  #rotTip{position:fixed;left:50%;top:calc(78px + env(safe-area-inset-top));
+    transform:translateX(-50%);z-index:11;pointer-events:none;display:none;
+    background:rgba(20,28,42,.55);color:#ffd93d;font-size:12px;font-weight:700;
+    padding:5px 12px;border-radius:999px;white-space:nowrap}
+  @media (orientation:portrait){ #rotTip{display:block} }
 
   /* ---------- 遮罩 ---------- */
   .overlay{position:fixed;inset:0;z-index:20;display:none;
@@ -105,6 +113,8 @@
   <div class="pad" id="btnL"><span>←</span>左脚</div>
   <div class="pad" id="btnR"><span>→</span>右脚</div>
 </div>
+
+<div id="rotTip">横屏体验更佳</div>
 
 <div class="overlay show" id="overlay">
   <div class="panel">

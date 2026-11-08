@@ -282,7 +282,7 @@ const G = {
   busX: CONFIG.bus.gapStart, busSpeed: 0,
   tickCount: 0, beatAt: 0,
   steps: 0, falls: 0, perfects: 0,
-  camX: CONFIG.cam.leadX,
+  camX: CONFIG.cam.leadX, camZ: CONFIG.cam.z,
 };
 window.__walk = G;   // 方便调试
 
@@ -337,6 +337,7 @@ function resetGame(){
   G.steps = 0; G.falls = 0; G.perfects = 0; G.tickCount = 0;
   G.busX = CONFIG.bus.gapStart; G.busSpeed = CONFIG.bus.speed;
   G.camX = CONFIG.cam.leadX;
+  G.camZ = CONFIG.cam.z;
   G.beatAt = performance.now() + BEAT_MS;
 
   if(frog){
@@ -633,17 +634,31 @@ function update(dt, now){
   }
 
   // ---- 相机跟随 ----
+  const portrait = camera.aspect < 1.15;
   if(G.started){
-    // 公交越拉越远时，镜头稍微往前推，尽量让公交留在画面里
     const gap = Math.max(0, G.busX - G.x);
-    const lead = CONFIG.cam.leadX + THREE.MathUtils.clamp((gap - 5.5) * 0.5, 0, 3.4);
-    const wantX = G.x + lead;
+    let wantX, wantZ;
+    if(portrait){
+      // 竖屏横向视野很窄：镜头停在奶蛙和公交之间，并按需要的横向范围自动拉远
+      wantX = G.x + Math.min(gap * 0.45, 3.4);
+      const halfNeed = (gap + CONFIG.bus.length * 0.5) * 0.5;     // 需要看到奶蛙到公交车头的半宽
+      const hFov = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(CONFIG.cam.fov) * 0.5) * camera.aspect);
+      wantZ = THREE.MathUtils.clamp(halfNeed / Math.tan(hFov * 0.5), CONFIG.cam.z, 30);
+    }else{
+      // 公交越拉越远时，镜头稍微往前推，尽量让公交留在画面里
+      wantX = G.x + CONFIG.cam.leadX + THREE.MathUtils.clamp((gap - 5.5) * 0.5, 0, 3.4);
+      wantZ = CONFIG.cam.z;
+    }
     G.camX += (wantX - G.camX) * (1 - Math.exp(-dt * CONFIG.cam.follow));
+    G.camZ += (wantZ - G.camZ) * (1 - Math.exp(-dt * CONFIG.cam.follow));
   }
   camera.position.x = G.camX;
   camera.position.y = CONFIG.cam.y;
-  camera.position.z = CONFIG.cam.z;
+  camera.position.z = G.camZ;
   camera.lookAt(G.camX, 1.35, 0);
+  // 竖屏镜头拉远后，雾也要跟着推远，否则街道会整片发白
+  scene.fog.near = Math.max(26, camera.position.z + 6);
+  scene.fog.far = scene.fog.near + 54;
 
   // ---- 完美提示淡出 ----
   if(perfectTimer > 0) perfectTimer -= dt;
