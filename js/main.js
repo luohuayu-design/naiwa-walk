@@ -580,6 +580,8 @@ function update(dt, now){
     G.upT += dt;
     if(G.upT >= CONFIG.fall.up){
       G.state = 'idle'; G.upT = 0;
+      // 摔倒起身后重新开始：左右脚都可以先出
+      G.hasStepped = false; G.lastSide = null;
       G.lastClickAt = now;      // 站起来后重新给玩家一个完整的节拍窗口
     }
   }
