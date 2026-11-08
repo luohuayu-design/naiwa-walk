@@ -39,6 +39,21 @@ const CONFIG = {
     // 下车路线：车门踏面 → 三级台阶 → 地面，共 4 步
     points: [[9.05, 1.44], [8.55, 1.38], [8.05, 0.92], [7.55, 0.46], [6.60, 0]],
   },
+  // 第四关：撑伞过马路（三指协调：左手长按撑伞 · 右手滑屏扶正 · 左右脚交替点地）
+  lvl4 : {
+    startX: 1.45, stepLen: 0.75, steps: 8, stepT: 0.26,
+    // 风力分三段逐渐变强：[振幅, 周期(秒)]
+    windPhases: [[0.30, 2.6], [0.48, 2.1], [0.64, 1.7]],
+    leanGain: 0.92,        // 风力作用到伞的倾斜系数
+    leanTau: 0.72,         // 按住伞时被风带歪的速度
+    leanTauLoose: 0.24,    // 没按住伞时歪得更快
+    missLean: 0.76,        // 倾斜超过这个 → 伞被吹翻
+    stepLean: 0.52,        // 倾斜必须小于这个才踩得动（对应量表绿区）
+    dragK: 0.0032,         // 滑动 1px 能扶正多少
+    leanClamp: 1.15,
+    gripGrace: 0.55,       // 松开伞最多能空这么久
+    missHold: 1.0,         // 摔倒后原地起身的时长
+  },
 };
 const BEAT_MS = 60000 / CONFIG.beat.bpm;
 
@@ -346,6 +361,13 @@ const el = {
   lv1      : document.getElementById('lv1'),
   lv2      : document.getElementById('lv2'),
   lv3      : document.getElementById('lv3'),
+  lv4      : document.getElementById('lv4'),
+  swipeZone: document.getElementById('swipeZone'),
+  l4WindNeedle: document.getElementById('l4WindNeedle'),
+  l4WindArrow : document.getElementById('l4WindArrow'),
+  l4WindLv    : document.getElementById('l4WindLv'),
+  l2TimeLbl : document.getElementById('l2TimeLbl'),
+  l2StepLbl : document.getElementById('l2StepLbl'),
   l2Time   : document.getElementById('l2Time'),
   l2Miss   : document.getElementById('l2Miss'),
   l2TimeChip: document.getElementById('l2TimeChip'),
@@ -744,6 +766,7 @@ function updateL2Progress(){
 
 function startLevel2(){
   const C = CONFIG.lvl2;
+  resetL4Scene();
   L2.active = true; L2.done = false;
   L2.timeLeft = C.time; L2.misses = 0;
   L2.fx = C.startX; L2.fy = 0;
@@ -785,6 +808,7 @@ function startLevel2(){
 }
 
 function setLevel1Scene(){
+  resetL4Scene();
   document.body.classList.remove('level2');
   document.body.classList.remove('level3');
   L2.active = false; L2.done = false;
@@ -1187,6 +1211,7 @@ function updateL3Progress(){
 
 function startLevel3(){
   const C = CONFIG.lvl3;
+  resetL4Scene();
   L3.active = true; L3.done = false;
   L3.timeLeft = C.time; L3.misses = 0;
   L3.step = 0; L3.stepT = 0; L3.stepFoot = null;
@@ -1507,11 +1532,508 @@ function updateLevel3(dt, now){
 }
 
 // ============================================================
+// 第四关：奶蛙撑伞过马路（三根手指同时配合）
+//
+// 雨很大，风一直在吹。三个动作必须同时成立，少一个都过不去：
+//   1) 左手长按「撑伞」——一松手，伞就被风掀走（0.55 秒宽限）；
+//   2) 右手在滑动区左右滑，把被风吹歪的伞扶正（量表回到绿区）；
+//   3) 只有伞正着（|倾斜| ≤ 0.52），脚才踩得动，左右脚交替点地往前走。
+// 伞歪过头 / 松手太久 → 摔倒（只记失误，不倒扣时间），原地起身继续。
+// 8 步踩完斑马线 = 过马路成功，结算显示用时和失误次数。
+// ============================================================
+const L4 = {
+  active: false, done: false, phase: 'play', phaseT: 0,
+  step: 0, stepT: 1, stepFoot: null, nextFoot: null,
+  fx: 0, fromX: 0, toX: 0,
+  grip: false, gripT: 0, everGrip: false,
+  lean: 0, wind: 0, windLv: 1,
+  misses: 0, elapsed: 0,
+  dragging: false, dragId: null, lastX: 0,
+  noteT: 0, missDir: 1,
+  props: null, umb: null, drops: null, rainArr: null, rainGeo: null,
+  hudCache: '', taskCache: '',
+};
+window.__l4 = L4;   // 方便调试
+
+function setSky(hex){
+  scene.background.setHex(hex);
+  scene.fog.color.setHex(hex);
+}
+
+function buildL4Props(){
+  if(L4.props) return L4.props;
+  const g = new THREE.Group();
+  const C = CONFIG.lvl4;
+
+  // 斑马线（横跨整条路，奶蛙沿着 +x 方向走过去）
+  for(let i = 0; i < 10; i++){
+    addBox(0.38, 0.02, 5.2, 0xeff3f8, 1.22 + i * 0.72, 0.018, 0, g);
+  }
+  // 雨后的水洼
+  const pudMat = new THREE.MeshLambertMaterial({ color: 0x5b7a95, transparent: true, opacity: 0.5 });
+  for(const [px, pz, s] of [[2.2, -1.1, 1.2], [4.0, 0.9, 0.9], [5.6, -0.6, 1.4], [1.1, 1.2, 0.8]]){
+    const m = new THREE.Mesh(new THREE.CircleGeometry(0.5, 20), pudMat);
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(px, 0.015, pz);
+    m.scale.set(s, s * 0.7, 1);
+    g.add(m);
+  }
+  // 雨（LineSegments：每滴两段点，跟着风斜着落）
+  const N = 160;
+  const arr = new Float32Array(N * 6);
+  const drops = [];
+  for(let i = 0; i < N; i++){
+    drops.push({
+      x: C.startX + Math.random() * 12 - 6,
+      y: Math.random() * 8,
+      z: Math.random() * 6 - 3,
+      vy: 9 + Math.random() * 4,
+    });
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+  const rain = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
+    color: 0xbcd6ee, transparent: true, opacity: 0.62,
+  }));
+  rain.frustumCulled = false;
+  g.add(rain);
+  L4.rainGeo = geo; L4.rainArr = arr; L4.drops = drops;
+
+  // 伞：以“握伞的手”为轴，整体倾斜
+  const umb = new THREE.Group();
+  const shaftMat = new THREE.MeshLambertMaterial({ color: 0x4a4f5a });
+  const canopy = new THREE.Mesh(new THREE.ConeGeometry(0.80, 0.34, 16), new THREE.MeshLambertMaterial({ color: 0xd94f4f }));
+  canopy.position.y = 0.70;
+  umb.add(canopy);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.76, 0.035, 8, 22), new THREE.MeshLambertMaterial({ color: 0xb83c3c }));
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = 0.54;
+  umb.add(rim);
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.033, 0.033, 0.80, 8), shaftMat);
+  shaft.position.y = 0.16;
+  umb.add(shaft);
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), shaftMat);
+  knob.position.y = -0.24;
+  umb.add(knob);
+  umb.visible = false;
+  g.add(umb);
+  L4.umb = umb;
+
+  g.visible = false;
+  scene.add(g);
+  L4.props = g;
+  return g;
+}
+
+function l4TaskText(){
+  const C = CONFIG.lvl4;
+  if(L4.phase === 'win') return '🎉 过马路成功';
+  if(L4.phase === 'miss') return null;          // miss 的文案由 l4Miss 单独写
+  if(!L4.grip) return '按住左边的「☂ 撑伞」，别松手';
+  if(L4.stepT < 1) return '抬脚…';
+  if(Math.abs(L4.lean) > C.stepLean){
+    return L4.lean > 0 ? '伞往右歪了 —— 往左滑把它扶正' : '伞往左歪了 —— 往右滑把它扶正';
+  }
+  const f = L4.nextFoot === 'L' ? '左脚' : (L4.nextFoot === 'R' ? '右脚' : '任意一只脚');
+  return '伞正了 —— 踩「' + f + '」向前一步';
+}
+
+function l4SetTask(txt){
+  if(!txt || !el.l2Task) return;
+  if(L4.taskCache === txt) return;
+  L4.taskCache = txt;
+  el.l2Task.textContent = txt;
+}
+
+function updateL4Progress(){
+  if(el.l2Step) el.l2Step.textContent = L4.step + '/' + CONFIG.lvl4.steps;
+}
+
+function l4ApplyHint(){
+  const C = CONFIG.lvl4;
+  const playing = L4.active && !L4.done && L4.phase === 'play';
+  const canStep = playing && L4.grip && L4.stepT >= 1 && Math.abs(L4.lean) <= C.stepLean;
+  if(el.footL) el.footL.classList.toggle('want', canStep && (L4.nextFoot === 'L' || !L4.nextFoot));
+  if(el.footR) el.footR.classList.toggle('want', canStep && (L4.nextFoot === 'R' || !L4.nextFoot));
+  if(el.btnL) el.btnL.classList.toggle('drop', playing && !L4.grip);
+  if(el.swipeZone) el.swipeZone.classList.toggle('bad', playing && Math.abs(L4.lean) > C.stepLean);
+}
+
+function startLevel4(){
+  const C = CONFIG.lvl4;
+  L4.active = true; L4.done = false;
+  L4.phase = 'play'; L4.phaseT = 0;
+  L4.step = 0; L4.stepT = 1; L4.stepFoot = null; L4.nextFoot = null;
+  L4.fx = C.startX; L4.fromX = C.startX; L4.toX = C.startX;
+  L4.grip = false; L4.gripT = 0; L4.everGrip = false;
+  L4.lean = 0; L4.wind = 0; L4.windLv = 1;
+  L4.misses = 0; L4.elapsed = 0;
+  L4.dragging = false; L4.dragId = null;
+  L4.noteT = 0; L4.missDir = 1;
+  L4.hudCache = ''; L4.taskCache = '';
+
+  ring.visible = false;
+  for(const p of pads) p.visible = false;
+  const props = buildL4Props();
+  props.visible = true;
+  if(L4.umb) L4.umb.visible = true;
+  if(bus) bus.root.visible = false;
+  if(L2.props) L2.props.visible = false;
+  if(L3.props) L3.props.visible = false;
+
+  document.body.classList.remove('level2');
+  document.body.classList.remove('level3');
+  document.body.classList.add('level4');
+  setSky(0x93a7ba);
+
+  if(el.l2TimeLbl) el.l2TimeLbl.textContent = '用时';
+  if(el.l2StepLbl) el.l2StepLbl.textContent = '步数';
+  if(el.l2TimeChip) el.l2TimeChip.classList.remove('low');
+  if(el.btnL){
+    el.btnL.innerHTML = '<span>☂</span>撑伞';
+    el.btnL.classList.remove('drop');
+    el.btnL.classList.remove('want');
+  }
+  if(el.btnR){ el.btnR.classList.remove('drop'); el.btnR.classList.remove('want'); }
+  if(el.footL){ el.footL.innerHTML = '<span>↓</span>左脚'; el.footL.classList.remove('want'); }
+  if(el.footR){ el.footR.innerHTML = '<span>↓</span>右脚'; el.footR.classList.remove('want'); }
+  if(el.swipeZone) el.swipeZone.classList.remove('bad');
+
+  if(frog){
+    frog.root.position.set(C.startX, 0, 0);
+    frog.root.rotation.y = CONFIG.frog.yaw;
+    frog.body.rotation.set(0, 0, 0);
+    frog.body.position.set(0, 0, 0);
+    for(const k in frog.parts){
+      const p = frog.parts[k];
+      p.pose.x = p.pose.y = p.pose.z = 0;
+    }
+  }
+  // 雨滴重新撒一遍
+  if(L4.drops){
+    for(const d of L4.drops){
+      d.x = C.startX + Math.random() * 12 - 6;
+      d.y = Math.random() * 8;
+      d.z = Math.random() * 6 - 3;
+    }
+  }
+  G.camX = C.startX + 1.25; G.camZ = CONFIG.cam.z;
+
+  updateL4Progress();
+  l4SetTask(l4TaskText());
+  updateL4HUD();
+  l4ApplyHint();
+  Sfx.init();
+}
+
+// 离开第四关：恢复天空色、公交、标签和外层类名
+function resetL4Scene(){
+  document.body.classList.remove('level4');
+  L4.active = false; L4.done = false;
+  L4.grip = false; L4.dragging = false;
+  if(L4.props) L4.props.visible = false;
+  if(L4.umb) L4.umb.visible = false;
+  if(bus) bus.root.visible = true;
+  setSky(0x9fd8ff);
+  if(el.l2TimeLbl) el.l2TimeLbl.textContent = '剩余';
+  if(el.l2StepLbl) el.l2StepLbl.textContent = '台阶';
+  if(el.l2TimeChip) el.l2TimeChip.classList.remove('low');
+  if(el.swipeZone) el.swipeZone.classList.remove('bad');
+  if(el.l4WindNeedle) el.l4WindNeedle.classList.remove('bad');
+  if(el.footL) el.footL.classList.remove('want');
+  if(el.footR) el.footR.classList.remove('want');
+  if(el.btnL){ el.btnL.classList.remove('drop'); el.btnL.classList.remove('want'); }
+}
+
+// ---- 左手：按住 = 撑伞 ----
+function l4PadDown(){
+  if(G.level !== 4 || !L4.active || L4.done || L4.phase !== 'play') return;
+  L4.grip = true; L4.gripT = 0; L4.everGrip = true;
+  l4SetTask(l4TaskText());
+  l4ApplyHint();
+}
+function l4PadUp(){
+  if(G.level !== 4 || !L4.active) return;
+  L4.grip = false;
+  l4ApplyHint();
+}
+
+// ---- 右手：滑动扶伞（dx 为手指移动的像素）----
+function l4Drag(dx){
+  if(G.level !== 4 || !L4.active || L4.done || L4.phase !== 'play') return;
+  const C = CONFIG.lvl4;
+  L4.lean = THREE.MathUtils.clamp(L4.lean + dx * C.dragK, -C.leanClamp, C.leanClamp);
+  if(Math.abs(L4.lean) > C.missLean) l4Miss('滑过头，伞被你推翻了');
+}
+
+// ---- 脚：伞正着才踩得动，左右交替 ----
+function l4FootTap(side){
+  if(G.level !== 4 || !L4.active || L4.done || L4.phase !== 'play') return;
+  const C = CONFIG.lvl4;
+  if(!L4.grip){
+    L4.noteT = 1.0;
+    l4SetTask('先按住左边的伞，脚才踩得动');
+    return;
+  }
+  if(L4.stepT < 1) return;
+  if(Math.abs(L4.lean) > C.stepLean){
+    L4.noteT = 1.0;
+    l4SetTask('伞还没扶正 —— 先滑回绿区再迈步');
+    return;
+  }
+  if(L4.nextFoot && side !== L4.nextFoot){
+    L4.noteT = 1.0;
+    l4SetTask('左右脚要交替 —— 这一步该踩「' + (L4.nextFoot === 'L' ? '左脚' : '右脚') + '」');
+    return;
+  }
+  l4Step(side);
+}
+
+function l4Step(foot){
+  const C = CONFIG.lvl4;
+  L4.stepFoot = foot;
+  L4.nextFoot = foot === 'L' ? 'R' : 'L';
+  L4.step++;
+  L4.fromX = L4.fx;
+  L4.toX = L4.fx + C.stepLen;
+  L4.stepT = 0;
+  L4.noteT = 0;
+  Sfx.step();
+  updateL4Progress();
+  l4SetTask(l4TaskText());
+  l4ApplyHint();
+}
+
+function l4Miss(reason){
+  if(!L4.active || L4.done || L4.phase !== 'play') return;
+  L4.misses++;
+  L4.missDir = L4.lean >= 0 ? 1 : -1;
+  L4.phase = 'miss'; L4.phaseT = 0;
+  L4.grip = false;
+  L4.taskCache = '';
+  Sfx.thud();
+  if(el.l2Task) el.l2Task.textContent = '失误：' + reason + '（已记录 ' + L4.misses + ' 次）';
+  updateL4HUD();
+  l4ApplyHint();
+}
+
+function l4Respawn(){
+  const C = CONFIG.lvl4;
+  L4.fx = C.startX + L4.step * C.stepLen;
+  L4.fromX = L4.toX = L4.fx;
+  L4.stepT = 1;
+  L4.lean = 0; L4.grip = false; L4.gripT = 0; L4.everGrip = false;
+  L4.phase = 'play'; L4.phaseT = 0;
+  L4.taskCache = '';
+  l4SetTask(l4TaskText());
+  l4ApplyHint();
+}
+
+function l4Win(){
+  if(L4.done) return;
+  L4.done = true; L4.active = false;
+  L4.phase = 'win'; L4.phaseT = 0;
+  L4.stepT = 1;
+  Sfx.win();
+  updateL4HUD();
+  const used = L4.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('🌂 过马路成功！',
+      '用时 <b>' + used + '</b> 秒 · 失误 <b>' + L4.misses + '</b> 次', '再玩一次');
+  }, 1400);
+}
+
+function updateL4Rain(dt){
+  if(!L4.rainGeo) return;
+  const arr = L4.rainArr, drops = L4.drops, N = drops.length;
+  for(let i = 0; i < N; i++){
+    const d = drops[i];
+    d.y -= d.vy * dt;
+    d.x += L4.wind * 0.6 * dt;
+    if(d.y < 0.05 || Math.abs(d.x - L4.fx) > 7){
+      d.x = L4.fx + (Math.random() * 12 - 6);
+      d.y = d.y < 0.05 ? 7.6 + Math.random() * 1.6 : d.y;
+      d.z = Math.random() * 6 - 3;
+    }
+    const j = i * 6;
+    arr[j] = d.x;                    arr[j + 1] = d.y;                    arr[j + 2] = d.z;
+    arr[j + 3] = d.x - L4.wind * 0.28; arr[j + 4] = d.y + 0.34;           arr[j + 5] = d.z;
+  }
+  L4.rainGeo.attributes.position.needsUpdate = true;
+}
+
+function l4Pose(dt, now){
+  const C = CONFIG.lvl4;
+  const t = now * 0.001;
+  TGT = {};
+  for(const k of BONES) TGT[k] = { x: 0, y: 0, z: 0 };
+  BTGT = { rz: 0, ry: 0, y: 0 };
+  const br = Math.sin(t * 2.1);
+  TGT.spine.x = br * 0.02;
+  TGT.head.x = br * 0.035;
+
+  if(L4.phase === 'win'){
+    const hop = Math.abs(Math.sin(t * 5.2));
+    BTGT.y = hop * 0.20;
+    TGT.armL.z = 1.28 + hop * 0.18;
+    TGT.armR.z = -1.30 - hop * 0.2;
+    TGT.head.x = -0.15;
+    applyPose(dt);
+    return;
+  }
+
+  if(L4.phase === 'miss'){
+    const k = Math.min(1, L4.phaseT / 0.5);
+    BTGT.rz = 0.9 * k;
+    BTGT.y = -0.08 * k;
+    TGT.armL.z = 0.9 * (1 - k * 0.35);
+    TGT.armR.z = -0.7 * k;
+    TGT.legL.z = 0.26 * k;
+    TGT.legR.z = -0.22 * k;
+    TGT.spine.x = -0.12 * k;
+    applyPose(dt);
+    return;
+  }
+
+  // play：左臂举伞，右臂横着顶风，身体往伞的反方向压
+  const s = L4.stepT < 1 ? Math.sin(Math.PI * L4.stepT) : 0;
+  const leftStep = L4.stepFoot === 'L';
+  TGT.armL.z = L4.grip ? (1.28 + br * 0.03) : (0.40 + br * 0.03);
+  TGT.armR.z = -0.34 - Math.abs(L4.lean) * 0.6;
+  BTGT.rz = L4.lean * 0.24;
+  BTGT.y = br * 0.012 + 0.07 * s;
+  TGT.spine.x = 0.03;
+  TGT.head.z = -BTGT.rz * 0.45;
+  if(L4.stepT < 1){
+    TGT[leftStep ? 'legL' : 'legR'].z = -0.42 * s;
+    TGT[leftStep ? 'legR' : 'legL'].z = 0.16 * s;
+  }else{
+    TGT.legL.z = 0.05;
+    TGT.legR.z = -0.05;
+  }
+  applyPose(dt);
+}
+
+function l4Camera(dt){
+  const portrait = camera.aspect < 1.15;
+  let wantX = L4.fx + 1.25;
+  let wantZ = CONFIG.cam.z;
+  if(portrait){
+    const halfNeed = 2.05;
+    const hFov = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(CONFIG.cam.fov) * 0.5) * camera.aspect);
+    wantZ = THREE.MathUtils.clamp(halfNeed / Math.tan(hFov * 0.5), CONFIG.cam.z, 32);
+    wantX = L4.fx + 0.6;
+  }
+  G.camX += (wantX - G.camX) * (1 - Math.exp(-dt * 3));
+  G.camZ += (wantZ - G.camZ) * (1 - Math.exp(-dt * 3));
+  camera.position.x = G.camX;
+  camera.position.y = CONFIG.cam.y;
+  camera.position.z = G.camZ;
+  camera.lookAt(G.camX, 1.45, 0);
+  scene.fog.near = Math.max(24, camera.position.z + 6);
+  scene.fog.far = scene.fog.near + 52;
+}
+
+function updateL4HUD(){
+  const key = L4.elapsed.toFixed(1) + '/' + L4.misses + '/' + L4.step;
+  if(key === L4.hudCache) return;
+  L4.hudCache = key;
+  if(el.l2Time) el.l2Time.textContent = L4.elapsed.toFixed(1);
+  if(el.l2Miss) el.l2Miss.textContent = L4.misses;
+  updateL4Progress();
+}
+
+function updateL4Meter(){
+  if(el.l4WindNeedle){
+    const l = THREE.MathUtils.clamp(L4.lean, -0.9, 0.9);
+    el.l4WindNeedle.style.left = (50 + l / 0.9 * 50).toFixed(1) + '%';
+    el.l4WindNeedle.classList.toggle('bad', Math.abs(L4.lean) > 0.62);
+  }
+  if(el.l4WindArrow) el.l4WindArrow.textContent = L4.wind >= 0 ? '→' : '←';
+  if(el.l4WindLv) el.l4WindLv.textContent = L4.windLv;
+}
+
+function updateLevel4(dt, now){
+  const C = CONFIG.lvl4;
+  L4.phaseT += dt;
+
+  // 正计时：只记录用时，不逼玩家
+  if(L4.active && !L4.done) L4.elapsed += dt;
+  if(L4.noteT > 0) L4.noteT -= dt;
+
+  // 风力：走得越远风越大（三段）
+  const prog = Math.min(1, L4.step / C.steps);
+  const pi = prog < 0.34 ? 0 : (prog < 0.67 ? 1 : 2);
+  const amp = C.windPhases[pi][0], per = C.windPhases[pi][1];
+  const w = 2 * Math.PI * (now * 0.001) / per;
+  L4.wind = amp * (0.88 * Math.sin(w) + 0.12 * Math.sin(2.33 * w + 1.1));
+  L4.windLv = pi + 1;
+
+  if(L4.phase === 'play'){
+    // 松手太久 → 伞被风掀走（第一次按伞之前不计时，给玩家准备时间）
+    if(L4.grip){
+      L4.gripT = 0;
+    }else if(L4.everGrip){
+      L4.gripT += dt;
+      if(L4.gripT > C.gripGrace) l4Miss('松手太久，伞被风掀走了');
+    }
+    // 伞被风吹歪；松手时歪得更快
+    if(L4.phase === 'play'){
+      const loosen = !L4.everGrip ? 1 : (L4.grip ? 1 : 1.8);
+      const target = L4.wind * C.leanGain * loosen;
+      const tau = (L4.grip || !L4.everGrip) ? C.leanTau : C.leanTauLoose;
+      L4.lean += (target - L4.lean) * (1 - Math.exp(-dt / tau));
+      if(Math.abs(L4.lean) > C.missLean) l4Miss('伞歪过头，被风吹翻了');
+    }
+  }
+
+  // 迈步动画
+  if(L4.phase === 'play' && L4.stepT < 1){
+    L4.stepT = Math.min(1, L4.stepT + dt / C.stepT);
+    L4.fx = L4.fromX + (L4.toX - L4.fromX) * easeInOutCubic(L4.stepT);
+    if(L4.stepT >= 1){
+      L4.fx = L4.toX;
+      if(L4.step >= C.steps) l4Win();
+    }
+  }else if(L4.phase === 'miss'){
+    if(L4.phaseT >= C.missHold) l4Respawn();
+  }
+
+  if(L4.noteT <= 0 && (L4.phase === 'play' || L4.phase === 'win')) l4SetTask(l4TaskText());
+
+  updateL4Rain(dt);
+
+  // 伞：以握把为轴倾斜；摔倒时翻过去
+  if(L4.umb){
+    const dropY = L4.grip ? 1.30 : 1.20;
+    L4.umb.position.set(L4.fx + 0.06, dropY, 0.06);
+    let tilt = L4.lean * 0.85;
+    if(L4.phase === 'miss'){
+      tilt = (0.76 * L4.missDir) + Math.min(1, L4.phaseT / 0.5) * 0.5 * L4.missDir;
+    }
+    L4.umb.rotation.z = -tilt;
+    L4.umb.visible = !(L4.phase === 'miss' && L4.phaseT > 0.85);
+  }
+
+  if(frog){
+    frog.root.position.x = L4.fx;
+    frog.root.position.y = 0;
+    l4Pose(dt, now);
+  }
+
+  l4ApplyHint();
+  l4Camera(dt);
+  updateL4Meter();
+  updateL4HUD();
+}
+
+// ============================================================
 // 每帧更新
 // ============================================================
 let lastT = performance.now();
 
 function update(dt, now){
+  if(G.level === 4){ updateLevel4(dt, now); return; }
   if(G.level === 3){ updateLevel3(dt, now); return; }
   if(G.level === 2){ updateLevel2(dt, now); return; }
   // ---- 节拍器 ----
@@ -1675,6 +2197,16 @@ function frame(){
 addEventListener('keydown', e=>{
   if(e.repeat) return;
   const k = e.key.toLowerCase();
+  if(G.level === 4){
+    // 按住 A 撑伞，← / → 滑动扶伞，J / K 踩左右脚
+    if(k === 'a'){ e.preventDefault(); l4PadDown(); }
+    else if(k === 'arrowleft'){ e.preventDefault(); l4Drag(-50); }
+    else if(k === 'arrowright'){ e.preventDefault(); l4Drag(50); }
+    else if(k === 'j'){ e.preventDefault(); l4FootTap('L'); }
+    else if(k === 'k'){ e.preventDefault(); l4FootTap('R'); }
+    else if(k === 'r' && G.over) startGame(4);
+    return;
+  }
   if(G.level === 3){
     // A / D 按住左右手，← / → 踩左右脚
     if(k === 'a'){ e.preventDefault(); l3HandDown('L'); }
@@ -1696,6 +2228,10 @@ addEventListener('keydown', e=>{
 
 addEventListener('keyup', e=>{
   const k = e.key.toLowerCase();
+  if(G.level === 4){
+    if(k === 'a') l4PadUp();
+    return;
+  }
   if(G.level === 3){
     if(k === 'a') l3HandUp('L');
     else if(k === 'd') l3HandUp('R');
@@ -1710,16 +2246,19 @@ for(const [id, side] of [['btnL', 'L'], ['btnR', 'R']]){
   const node = document.getElementById(id);
   node.addEventListener('pointerdown', e=>{
     e.preventDefault();
-    if(G.level === 3) l3HandDown(side);
+    if(G.level === 4) l4PadDown();
+    else if(G.level === 3) l3HandDown(side);
     else if(G.level === 2) l2PadDown(side);
     else pressFoot(side);
   }, { passive: false });   // 只监听 pointer 事件，避免触摸时重复触发
   node.addEventListener('pointerup', ()=>{
-    if(G.level === 3) l3HandUp(side);
+    if(G.level === 4) l4PadUp();
+    else if(G.level === 3) l3HandUp(side);
     else if(G.level === 2) l2PadUp(side);
   });
   node.addEventListener('pointercancel', ()=>{
-    if(G.level === 3) l3HandUp(side);
+    if(G.level === 4) l4PadUp();
+    else if(G.level === 3) l3HandUp(side);
     else if(G.level === 2) l2PadUp(side);
   });
   node.addEventListener('contextmenu', e=>e.preventDefault());
@@ -1730,10 +2269,37 @@ for(const [id, side] of [['footL', 'L'], ['footR', 'R']]){
   const node = document.getElementById(id);
   node.addEventListener('pointerdown', e=>{
     e.preventDefault();
-    if(G.level === 3) l3FootTap(side);
+    if(G.level === 4) l4FootTap(side);
+    else if(G.level === 3) l3FootTap(side);
   }, { passive: false });
   node.addEventListener('contextmenu', e=>e.preventDefault());
 }
+
+// 第四关：右手在滑动区左右滑，把被风吹歪的伞扶正
+(function(){
+  const zone = document.getElementById('swipeZone');
+  if(!zone) return;
+  zone.addEventListener('pointerdown', e=>{
+    e.preventDefault();
+    if(G.level !== 4 || !L4.active || L4.done) return;
+    L4.dragging = true; L4.dragId = e.pointerId; L4.lastX = e.clientX;
+    try{ zone.setPointerCapture(e.pointerId); }catch(_){}
+  }, { passive: false });
+  zone.addEventListener('pointermove', e=>{
+    if(!L4.dragging || e.pointerId !== L4.dragId) return;
+    e.preventDefault();
+    const dx = e.clientX - L4.lastX;
+    L4.lastX = e.clientX;
+    l4Drag(dx);
+  }, { passive: false });
+  const stop = e=>{
+    if(e.pointerId !== L4.dragId) return;
+    L4.dragging = false; L4.dragId = null;
+  };
+  zone.addEventListener('pointerup', stop);
+  zone.addEventListener('pointercancel', stop);
+  zone.addEventListener('contextmenu', e=>e.preventDefault());
+})();
 
 // 第二关：两只手各自一个按钮，按住/松开由 pointerdown / pointerup 驱动
 el.homeBtn.addEventListener('click', ()=>showLevels());
@@ -1741,17 +2307,19 @@ el.backHomeBtn.addEventListener('click', ()=>showHome());
 el.lv1.addEventListener('click', ()=>startGame(1));
 el.lv2.addEventListener('click', ()=>startGame(2));
 el.lv3.addEventListener('click', ()=>startGame(3));
+el.lv4.addEventListener('click', ()=>startGame(4));
 el.ovBtn.addEventListener('click', ()=>startGame(G.level || 1));
 el.ovHomeBtn.addEventListener('click', ()=>showHome());
 el.homeChip.addEventListener('click', ()=>showHome());
 
 function startGame(level){
   if(!G.ready) return;      // 素材还没加载完
-  G.level = (level === 3) ? 3 : ((level === 2) ? 2 : 1);
+  G.level = (level === 4) ? 4 : ((level === 3) ? 3 : ((level === 2) ? 2 : 1));
   G.screen = 'game';
   el.overlay.classList.remove('show');
   document.body.classList.add('ingame');
-  if(G.level === 3) startLevel3();
+  if(G.level === 4) startLevel4();
+  else if(G.level === 3) startLevel3();
   else if(G.level === 2) startLevel2();
   else { setLevel1Scene(); resetGame(); }
 }
