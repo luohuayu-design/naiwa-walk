@@ -13,7 +13,7 @@ import { loadFrog, setSkin } from './frog.js';
 const CONFIG = {
   step : { dist: 0.66, dur: 0.30, perfectBoost: 0.10 },       // 一步走多远 / 走多久 / 完美步伐加成
   beat : { bpm: 96, fastRatio: 0.55, slowRatio: 1.75, perfectRatio: 0.16 },
-  bus  : { url: 'assets/bus.glb', length: 6.0, gapStart: 7.0, winGap: 2.7, loseGap: 14.0, speed: 0.68, flip: true },
+  bus  : { url: 'assets/bus.glb', length: 6.0, gapStart: 7.0, winGap: 2.7, loseGap: 14.0, speed: 0.68, flip: false },
   cam  : { leadX: 3.2, y: 3.1, z: 10.5, fov: 45, follow: 4.5 },
   fall : { down: 0.95, up: 0.75 },
   frog : { head: 0xfff08a, belly: 0xffd93d, yaw: 1.35, height: 1.45 },
