@@ -17,15 +17,16 @@ const CONFIG = {
   cam  : { leadX: 3.2, y: 3.1, z: 10.5, fov: 45, follow: 4.5 },
   fall : { down: 0.95, up: 0.75 },
   frog : { head: 0xfff08a, belly: 0xffd93d, yaw: 1.35, height: 1.45 },
-  // 第二关：上公交车
+  // 第二关：上公交车（双手同时协作：双指按住 → 左右交替单手短松蹬台阶）
   lvl2 : {
     time: 30, missPenalty: 3,
-    chargeMin: 0.18, chargeMax: 2.1, perfectMin: 0.35, perfectMax: 1.2,
-    jumpT: 0.55,
-    railHold: 0.6, swipeDist: 70,
+    settle: 0.30,          // 每次蹬腿后必须双手按住稳住这么久，才能再松手
+    releaseWindow: 0.55,   // 单手最多松开这么久，超时就算脱手摔倒
+    climbT: 0.32,          // 蹬上一级台阶的动画时长
     startX: 6.3, busX: 12.3,
-    stepTopX: 8.45, stepTopY: 1.38,
-    doorX: 9.55, doorY: 2.0,
+    doorX: 10.15, doorY: 1.44,
+    // 攀爬路线：地面 → 三级台阶顶 → 车门口，共 4 步
+    points: [[6.3, 0], [7.55, 0.46], [8.05, 0.92], [8.55, 1.38], [9.05, 1.44]],
   },
 };
 const BEAT_MS = 60000 / CONFIG.beat.bpm;
@@ -337,10 +338,9 @@ const el = {
   l2Miss   : document.getElementById('l2Miss'),
   l2TimeChip: document.getElementById('l2TimeChip'),
   l2Task   : document.getElementById('l2Task'),
-  l2ChargeWrap: document.getElementById('l2ChargeWrap'),
-  l2ChargeFill: document.getElementById('l2ChargeFill'),
-  railBtn  : document.getElementById('railBtn'),
-  swipeHint: document.getElementById('swipeHint'),
+  l2Step   : document.getElementById('l2Step'),
+  l2ProgWrap: document.getElementById('l2ProgWrap'),
+  l2ProgFill: document.getElementById('l2ProgFill'),
   btnL     : document.getElementById('btnL'),
   btnR     : document.getElementById('btnR'),
   backHomeBtn: document.getElementById('backHomeBtn'),
@@ -611,20 +611,31 @@ function applyPose(dt){
 }
 
 // ============================================================
-// 第二关：奶蛙上公交（三段式：双指蓄力跳 → 长按抓扶手 → 上滑钻车门）
+// 第二关：奶蛙上公交（一体化协调）
+//
+// 规则只有一条，但两只手必须同时在做事：
+//   1) 双指同时按住左右把手，才算稳住身体；
+//   2) 想蹬上一级台阶，必须「松开一只手 → 立刻再按住」，
+//      松开的那只手 ≤ 0.55 秒，另一只手必须一直撑住；
+//   3) 蹬完要双手按住稳 0.3 秒才能松下一次，而且左右手必须交替。
+//   任何一刻两只手同时离开 → 摔；支撑手在松手期间松开 → 摔。
+//   4 次交替 = 三级台阶 + 钻进车门。
 // ============================================================
 const L2 = {
-  active: false, done: false, phase: 'charge', phaseT: 0,
-  timeLeft: 0, misses: 0, checkpoint: 'charge',
+  active: false, done: false, phase: 'ready', phaseT: 0,
+  timeLeft: 0, misses: 0,
   fx: 0, fy: 0,                 // 奶蛙实际位置
-  fromX: 0, fromY: 0, toX: 0, toY: 0,
-  down: { L: false, R: false }, downAt: { L: 0, R: 0 },
-  bothAt: 0, chargeT: 0,
-  railHolding: false, railT: 0,
-  swipeY0: null,
+  fromX: 0, fromY: 0, toX: 0, toY: 0, climbT: 0,
+  step: 0,                      // 已完成的蹬腿次数
+  down: { L: false, R: false },
+  relSide: null, relT: 0,       // 当前松开的那只手 / 已松开多久
+  settleT: 0,                   // 双手按住稳住的累计时间
+  lastLift: null,               // 上一步松的是哪只手（下一步必须换手）
+  beatAt: 0,
+  noteT: 0,                     // 临时提示的剩余显示时间
   missAngle: 0.9,
   props: null,
-  hudCache: '',
+  hudCache: '', taskCache: '',
 };
 window.__l2 = L2;   // 方便调试
 
@@ -637,16 +648,18 @@ function buildL2Props(){
     const h = 0.46 * (i + 1);
     addBox(0.5, h, 1.4, i % 2 ? 0xd7dde8 : 0xc6cfdf, 7.55 + i * 0.5, h / 2, 0, g);
   }
-  // 扶手（竖杆 + 横 handle），立在台阶顶右侧、镜头这一侧
-  addBox(0.09, 1.5, 0.09, 0xd9a441, 8.75, 2.2, 1.5, g);
-  addBox(0.55, 0.09, 0.09, 0xd9a441, 8.98, 2.95, 1.5, g);
-  // 车门：金属门框 + 两扇玻璃 + 黄色门缝（底边略高于台阶顶，避免和台阶穿插）
+  // 扶手（竖杆 + 横 handle）：左右各一根，奶蛙双手分别抓着往上蹬
+  addBox(0.09, 1.6, 0.09, 0xd9a441, 8.6, 2.2, 0.8, g);
+  addBox(0.55, 0.09, 0.09, 0xd9a441, 8.38, 3.0, 0.8, g);
+  addBox(0.09, 1.6, 0.09, 0xd9a441, 8.6, 2.2, -0.8, g);
+  addBox(0.55, 0.09, 0.09, 0xd9a441, 8.38, 3.0, -0.8, g);
+  // 车门：开在车身靠车尾这一侧（金属门框 + 两扇玻璃 + 黄色门缝）
   addBox(1.42, 1.75, 0.07, 0x9aa8bb, C.doorX, 2.36, 1.36, g);
   addBox(0.58, 1.52, 0.05, 0x1f4a66, C.doorX - 0.32, 2.36, 1.42, g);
   addBox(0.58, 1.52, 0.05, 0x1f4a66, C.doorX + 0.32, 2.36, 1.42, g);
   addBox(0.05, 1.52, 0.06, 0xffd93d, C.doorX, 2.36, 1.44, g);
-  // 上车踏面（连着台阶顶和车门）
-  addBox(1.35, 0.12, 1.05, 0x9aa8bb, C.doorX - 0.1, 1.44, 0.85, g);
+  // 上车踏面（连着台阶顶和车门，延伸到画面这一侧，奶蛙才踩得实）
+  addBox(1.55, 0.12, 1.6, 0x9aa8bb, C.doorX - 0.75, 1.44, 0.55, g);
   // 地面引导箭头（指向台阶）
   const arr = new THREE.Mesh(
     new THREE.ConeGeometry(0.28, 0.62, 3),
@@ -662,45 +675,70 @@ function buildL2Props(){
   return g;
 }
 
+// 当前该松/该按哪只手：'L' | 'R' | 'both' | null
+function l2HintSide(){
+  if(!L2.active || L2.done) return null;
+  if(L2.phase === 'ready') return 'both';
+  if(L2.phase !== 'grip') return null;
+  if(L2.relSide) return L2.relSide;                       // 松手了，提示快按回这只
+  if(L2.settleT < CONFIG.lvl2.settle) return null;        // 还在稳住
+  return L2.lastLift === 'L' ? 'R' : 'L';                 // 必须换另一只手
+}
+
+function l2TaskText(){
+  const C = CONFIG.lvl2;
+  if(L2.phase === 'ready') return '双指同时按住左右两个把手，稳住身体';
+  if(L2.phase === 'climb') return '蹬！';
+  if(L2.phase === 'grip'){
+    if(L2.relSide) return '快按住「' + (L2.relSide === 'L' ? '左' : '右') + '手」！';
+    if(L2.settleT < C.settle) return '双手按住，稳住…';
+    if(!L2.lastLift) return '松开任意一只手，另一只手撑住，再按住';
+    const s = L2.lastLift === 'L' ? '右' : '左';
+    return '松开「' + s + '手」，另一只手撑住，再按住';
+  }
+  if(L2.phase === 'win') return '🎉 上车成功';
+  return null;      // miss 的文案由 l2Miss 单独写
+}
+
+function l2SetTask(txt){
+  if(!txt || !el.l2Task) return;
+  if(L2.taskCache === txt) return;
+  L2.taskCache = txt;
+  el.l2Task.textContent = txt;
+}
+
+function l2ApplyHint(){
+  const h = l2HintSide();
+  if(el.btnL) el.btnL.classList.toggle('want', h === 'both' || h === 'L');
+  if(el.btnR) el.btnR.classList.toggle('want', h === 'both' || h === 'R');
+}
+
 function setL2Phase(p){
   L2.phase = p;
   L2.phaseT = 0;
-  if(p === 'charge' || p === 'air'){
-    el.railBtn.classList.remove('on', 'hold');
-    el.swipeHint.classList.remove('on');
-    el.l2Task.textContent = '双指同时按住左右两个按钮蓄力，松手起跳';
-  }else if(p === 'rail'){
-    el.railBtn.classList.add('on');
-    el.swipeHint.classList.remove('on');
-    el.l2Task.textContent = '按住中间的「扶手」按钮，坚持 0.6 秒别松手';
-  }else if(p === 'swipe'){
-    el.railBtn.classList.remove('on', 'hold');
-    el.swipeHint.classList.add('on');
-    el.l2Task.textContent = '抓住扶手了！手指向上滑动，钻进车门';
-  }else if(p === 'enter' || p === 'win'){
-    el.railBtn.classList.remove('on', 'hold');
-    el.swipeHint.classList.remove('on');
-    el.l2Task.textContent = p === 'win' ? '🎉 上车成功' : '正在爬进车门…';
-  }else if(p === 'miss'){
-    el.railBtn.classList.remove('on', 'hold');
-    el.swipeHint.classList.remove('on');
-  }
-  el.l2ChargeWrap.classList.toggle('on', p === 'charge');
-  if(p !== 'charge') el.l2ChargeWrap.classList.remove('on');
+  const showBar = (p === 'ready' || p === 'grip' || p === 'climb');
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.toggle('on', showBar);
+  if(p !== 'miss') l2SetTask(l2TaskText());
+  l2ApplyHint();
+}
+
+function updateL2Progress(){
+  const total = CONFIG.lvl2.points.length - 1;
+  if(el.l2ProgFill) el.l2ProgFill.style.width = (L2.step / total * 100).toFixed(1) + '%';
+  if(el.l2Step) el.l2Step.textContent = L2.step + '/' + total;
 }
 
 function startLevel2(){
   const C = CONFIG.lvl2;
   L2.active = true; L2.done = false;
   L2.timeLeft = C.time; L2.misses = 0;
-  L2.checkpoint = 'charge';
   L2.fx = C.startX; L2.fy = 0;
+  L2.step = 0; L2.climbT = 0;
   L2.down.L = L2.down.R = false;
-  L2.downAt.L = L2.downAt.R = 0;
-  L2.bothAt = 0; L2.chargeT = 0;
-  L2.railHolding = false; L2.railT = 0;
-  L2.swipeY0 = null;
-  L2.hudCache = '';
+  L2.relSide = null; L2.relT = 0;
+  L2.settleT = 0; L2.lastLift = null;
+  L2.beatAt = performance.now() + BEAT_MS;
+  L2.hudCache = ''; L2.taskCache = '';
 
   ring.visible = false;
   for(const p of pads) p.visible = false;
@@ -720,81 +758,99 @@ function startLevel2(){
   }
   G.camX = 9.9; G.camZ = CONFIG.cam.z;
   document.body.classList.add('level2');
-  if(el.btnL) el.btnL.innerHTML = '<span>←</span>按住';
-  if(el.btnR) el.btnR.innerHTML = '<span>→</span>按住';
-  setL2Phase('charge');
+  if(el.btnL) el.btnL.innerHTML = '<span>←</span>左手';
+  if(el.btnR) el.btnR.innerHTML = '<span>→</span>右手';
+  updateL2Progress();
+  setL2Phase('ready');
   updateL2HUD();
+  Sfx.init();
 }
 
 function setLevel1Scene(){
   document.body.classList.remove('level2');
   L2.active = false; L2.done = false;
   if(L2.props) L2.props.visible = false;
-  if(el.btnL) el.btnL.innerHTML = '<span>←</span>左脚';
-  if(el.btnR) el.btnR.innerHTML = '<span>→</span>右脚';
+  if(el.btnL){
+    el.btnL.innerHTML = '<span>←</span>左脚';
+    el.btnL.classList.remove('want');
+  }
+  if(el.btnR){
+    el.btnR.innerHTML = '<span>→</span>右脚';
+    el.btnR.classList.remove('want');
+  }
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
   ring.visible = true;
   for(const p of pads) p.visible = true;
 }
 
-// ---- 第二步：长按抓扶手 ----
-function l2RailDown(){
-  if(G.level !== 2 || L2.phase !== 'rail' || L2.railHolding) return;
-  L2.railHolding = true; L2.railT = 0;
-  el.railBtn.classList.add('hold');
-}
-function l2RailUp(){
-  if(G.level !== 2 || !L2.railHolding) return;
-  L2.railHolding = false;
-  el.railBtn.classList.remove('hold');
-  if(L2.phase === 'rail' && L2.railT < CONFIG.lvl2.railHold) l2Miss('手滑了，没抓住扶手');
-}
-
-// ---- 第三步：上滑钻车门 ----
-function l2Swipe(){
-  if(G.level !== 2 || L2.phase !== 'swipe') return;
-  const C = CONFIG.lvl2;
-  L2.fromX = L2.fx; L2.fromY = L2.fy;
-  L2.toX = C.doorX; L2.toY = C.doorY;
-  setL2Phase('enter');
-}
-
-function l2ChargeStart(){
-  if(G.level !== 2 || L2.phase !== 'charge') return;
-  const now = performance.now();
-  if(L2.down.L && L2.down.R){
-    L2.bothAt = Math.max(L2.downAt.L, L2.downAt.R);
-    if(!L2.chargeT) L2.chargeT = (now - L2.bothAt) / 1000;
-  }
-}
-
+// ---- 两手输入：按住 = 抓稳，松开 = 蹬腿 ----
 function l2PadDown(side){
-  if(G.level !== 2 || !L2.active) return;
-  if(L2.phase !== 'charge') return;      // 只有第一阶段才记蓄力，避免别的阶段误按
+  if(G.level !== 2 || !L2.active || L2.done) return;
+  if(L2.phase === 'miss' || L2.phase === 'win') return;
   L2.down[side] = true;
-  L2.downAt[side] = performance.now();
-  l2ChargeStart();
+  if(L2.phase === 'climb') return;      // 蹬腿动画中只记录手的状态
+
+  if(L2.phase === 'ready'){
+    if(L2.down.L && L2.down.R){
+      L2.settleT = 0;
+      setL2Phase('grip');               // 两只手都抓住了，开始攀爬
+    }
+    return;
+  }
+
+  if(L2.phase === 'grip' && L2.relSide === side){
+    // 松开的那只手按回来了 → 这一级蹬上去
+    const okSettle = L2.relSettleOk;
+    L2.relSide = null; L2.relT = 0;
+    if(!okSettle) return;               // 松得太急（还没稳住），这次不算
+    if(L2.down.L && L2.down.R){
+      if(side === L2.lastLift){
+        L2.noteT = 0.9;
+        l2SetTask('换另一只手上，左右交替才能往上蹬');
+      }else{
+        l2Climb(side);
+      }
+    }
+  }
 }
 
 function l2PadUp(side){
-  if(G.level !== 2) return;
+  if(G.level !== 2 || !L2.active) return;
   L2.down[side] = false;
-  if(L2.phase !== 'charge' || !L2.bothAt) return;
-  const held = (performance.now() - L2.bothAt) / 1000;
-  L2.bothAt = 0; L2.chargeT = 0;
-  l2Jump(held);
+  if(L2.phase !== 'grip') return;
+
+  if(L2.relSide && L2.relSide !== side){
+    l2Miss('支撑的手也松了，摔下去了');
+    return;
+  }
+  if(!L2.down.L && !L2.down.R){
+    l2Miss('两只手同时松开，身体失去支撑');
+    return;
+  }
+  if(!L2.relSide){
+    L2.relSide = side;
+    L2.relT = 0;
+    L2.relSettleOk = (L2.settleT >= CONFIG.lvl2.settle);   // 没稳住就松手 = 白松
+    L2.settleT = 0;
+    l2SetTask(l2TaskText());
+    l2ApplyHint();
+  }
 }
 
-function l2Jump(held){
+function l2Climb(side){
   const C = CONFIG.lvl2;
-  if(held < C.chargeMin){ l2Miss('蓄力太短，跳不上去'); return; }
-  if(held > C.chargeMax){ l2Miss('蓄力过头，脚底一滑'); return; }
-  if(held >= C.perfectMin && held <= C.perfectMax){
-    L2.timeLeft += 0.5;               // 踩中绿区奖励
-    el.l2TimeChip.classList.remove('low');
-  }
+  const P = C.points;
+  L2.lastLift = side;
+  L2.step = Math.min(L2.step + 1, P.length - 1);
   L2.fromX = L2.fx; L2.fromY = L2.fy;
-  L2.toX = C.stepTopX; L2.toY = C.stepTopY;
-  setL2Phase('air');
+  L2.toX = P[L2.step][0];
+  L2.toY = P[L2.step][1];
+  L2.climbT = 0;
+  L2.settleT = 0;
+  L2.beatAt = performance.now() + BEAT_MS;
+  Sfx.step();
+  setL2Phase('climb');
+  updateL2Progress();
 }
 
 function l2Miss(reason){
@@ -802,30 +858,25 @@ function l2Miss(reason){
   const C = CONFIG.lvl2;
   L2.misses++;
   L2.timeLeft = Math.max(0, L2.timeLeft - C.missPenalty);
-  // 摔向哪边：看你是在台阶上还是地上
-  L2.missAngle = (L2.checkpoint === 'rail') ? -0.9 : 0.9;
+  L2.missAngle = L2.fy > 0.5 ? -0.9 : 0.9;   // 台阶上往后仰，地面上往前扑
+  L2.relSide = null; L2.relT = 0; L2.relSettleOk = false;
+  L2.settleT = 0;
+  Sfx.thud();
   setL2Phase('miss');
-  el.l2Task.textContent = '失误：' + reason + '（-' + C.missPenalty + ' 秒）';
+  l2SetTask('失误：' + reason + '（-' + C.missPenalty + ' 秒）');
   updateL2HUD();
   if(L2.timeLeft <= 0) setTimeout(l2Lose, 700);
 }
 
 function l2Respawn(){
   const C = CONFIG.lvl2;
-  L2.down.L = L2.down.R = false;
-  L2.downAt.L = L2.downAt.R = 0;
-  L2.bothAt = 0; L2.chargeT = 0;
-  L2.railHolding = false; L2.railT = 0;
-  if(L2.checkpoint === 'rail'){
-    L2.fx = C.stepTopX; L2.fy = C.stepTopY;
-    setL2Phase('rail');
-  }else{
-    L2.fx = C.startX; L2.fy = 0;
-    setL2Phase('charge');
-  }
-  el.l2Task.textContent = L2.phase === 'rail'
-    ? '按住中间的「扶手」按钮，坚持 0.6 秒别松手'
-    : '双指同时按住左右两个按钮蓄力，松手起跳';
+  const p = C.points[Math.min(L2.step, C.points.length - 1)];
+  L2.fx = p[0]; L2.fy = p[1];
+  L2.relSide = null; L2.relT = 0; L2.relSettleOk = false;
+  L2.settleT = 0; L2.lastLift = null;
+  L2.beatAt = performance.now() + BEAT_MS;
+  if(L2.down.L && L2.down.R) setL2Phase('grip');
+  else setL2Phase('ready');
 }
 
 function l2Win(){
@@ -845,10 +896,11 @@ function l2Lose(){
   if(L2.done) return;
   L2.done = true; L2.active = false;
   setL2Phase('miss');
+  l2SetTask('时间到，车门关上了');
   showOverlay('时间到…', '车门关上了，奶蛙还没上去', '再试一次');
 }
 
-// 第二关的姿势
+// 第二关的姿势：双手抓把手，松哪只手就抬哪条腿
 function l2Pose(dt, now){
   const t = now * 0.001;
   TGT = {};
@@ -857,36 +909,38 @@ function l2Pose(dt, now){
   const br = Math.sin(t * 2.1);
   TGT.spine.x = br * 0.02;
   TGT.head.x = br * 0.035;
-  TGT.armL.z = 0.035 + br * 0.03;
-  TGT.armR.z = -0.035 - br * 0.03;
 
-  if(L2.phase === 'charge'){
-    const c = Math.min(1, L2.chargeT / 1.2);
-    BTGT.y = -0.14 * c;
-    TGT.legL.z = 0.22 * c;
-    TGT.legR.z = -0.22 * c;
-    TGT.spine.x = 0.12 * c;
-    TGT.armL.z = 0.35 * c;
-    TGT.armR.z = -0.35 * c;
-  }else if(L2.phase === 'air'){
-    TGT.armL.z = 1.25;  TGT.armR.z = -1.25;
-    TGT.legL.z = 0.34;  TGT.legR.z = -0.30;
-  }else if(L2.phase === 'rail'){
-    TGT.armL.z = 1.45;  TGT.armR.z = -1.45;
-    TGT.legL.z = 0.22;  TGT.legR.z = -0.18;
-    BTGT.y = L2.railHolding ? 0.05 : 0;
-  }else if(L2.phase === 'swipe'){
-    TGT.armL.z = 1.45;  TGT.armR.z = -1.45;
-    TGT.legL.z = -0.12; TGT.legR.z = 0.12;
-  }else if(L2.phase === 'enter'){
-    TGT.armL.z = 1.30;  TGT.armR.z = -1.30;
-    TGT.legL.z = 0.38;  TGT.legR.z = -0.32;
+  if(L2.phase === 'ready'){
+    TGT.armL.z = 0.55 + br * 0.04;
+    TGT.armR.z = -0.55 - br * 0.04;
+    TGT.legL.z = 0.06;
+    TGT.legR.z = -0.06;
+  }else if(L2.phase === 'grip'){
+    // 双手抓稳；正在松的那只手对应的腿抬起去蹬，另一条腿支撑
+    TGT.armL.z = (L2.relSide === 'L') ? 0.85 : 1.30;
+    TGT.armR.z = (L2.relSide === 'R') ? -0.85 : -1.30;
+    TGT.spine.x = -0.05;
+    const lift = L2.relSide === 'L' ? 1 : (L2.relSide === 'R' ? -1 : 0);
+    TGT.legL.z = 0.10 + (lift > 0 ? 0.42 : 0);
+    TGT.legR.z = -0.10 - (lift < 0 ? 0.42 : 0);
+    BTGT.rz = lift * 0.10;
+    BTGT.y = (L2.relSide ? 0.04 : 0) + br * 0.01;
+  }else if(L2.phase === 'climb'){
+    const k = Math.min(1, L2.climbT / CONFIG.lvl2.climbT);
+    const s = Math.sin(Math.PI * k);
+    TGT.armL.z = 1.30 - 0.22 * s;
+    TGT.armR.z = -1.30 + 0.22 * s;
+    TGT.legL.z = 0.34 * s;
+    TGT.legR.z = -0.30 * s;
+    TGT.spine.x = 0.10 * s;
   }else if(L2.phase === 'miss'){
     const k = Math.min(1, L2.phaseT / 0.45);
     BTGT.rz = L2.missAngle * k;
     BTGT.y = -0.06 * k;
     TGT.armL.z = 0.55 * k;
     TGT.armR.z = -0.55 * k;
+    TGT.legL.z = 0.25 * k;
+    TGT.legR.z = -0.20 * k;
   }else if(L2.phase === 'win'){
     const hop = Math.abs(Math.sin(t * 5.2));
     BTGT.y = hop * 0.20;
@@ -909,20 +963,21 @@ function l2Camera(dt){
   G.camX += (wantX - G.camX) * (1 - Math.exp(-dt * 3));
   G.camZ += (wantZ - G.camZ) * (1 - Math.exp(-dt * 3));
   camera.position.x = G.camX;
-  camera.position.y = CONFIG.cam.y;
+  camera.position.y = CONFIG.cam.y + L2.fy * 0.45;
   camera.position.z = G.camZ;
-  camera.lookAt(G.camX, 1.55, 0);
+  camera.lookAt(G.camX, 1.5 + L2.fy * 0.45, 0);
   scene.fog.near = Math.max(26, camera.position.z + 6);
   scene.fog.far = scene.fog.near + 54;
 }
 
 function updateL2HUD(){
-  const key = L2.timeLeft.toFixed(1) + '/' + L2.misses;
+  const key = L2.timeLeft.toFixed(1) + '/' + L2.misses + '/' + L2.step;
   if(key === L2.hudCache) return;
   L2.hudCache = key;
   el.l2Time.textContent = L2.timeLeft.toFixed(1);
   el.l2Miss.textContent = L2.misses;
   el.l2TimeChip.classList.toggle('low', L2.timeLeft <= 8);
+  updateL2Progress();
 }
 
 function updateLevel2(dt, now){
@@ -935,40 +990,42 @@ function updateLevel2(dt, now){
       l2Lose();
     }
   }
+  if(L2.noteT > 0) L2.noteT -= dt;
 
-  if(L2.phase === 'charge'){
-    if(L2.down.L && L2.down.R && L2.bothAt){
-      L2.chargeT = (now - L2.bothAt) / 1000;
-    }else if(!L2.bothAt){
-      L2.chargeT = 0;
+  if(L2.phase === 'ready'){
+    if(L2.down.L && L2.down.R){
+      L2.settleT = 0;
+      setL2Phase('grip');
     }
+  }else if(L2.phase === 'grip'){
     const C = CONFIG.lvl2;
-    el.l2ChargeFill.style.width = Math.min(100, (L2.chargeT / C.chargeMax) * 100).toFixed(1) + '%';
-    el.l2ChargeWrap.classList.toggle('on', L2.chargeT > 0.02);
-  }else if(L2.phase === 'air'){
-    const C = CONFIG.lvl2;
-    const k = Math.min(1, L2.phaseT / C.jumpT);
-    L2.fx = L2.fromX + (L2.toX - L2.fromX) * easeOutCubic(k);
-    L2.fy = L2.fromY + (L2.toY - L2.fromY) * easeOutCubic(k) + Math.sin(Math.PI * k) * 0.55;
-    if(k >= 1){
-      L2.fx = L2.toX; L2.fy = L2.toY;
-      L2.checkpoint = 'rail';
-      setL2Phase('rail');
-    }
-  }else if(L2.phase === 'rail'){
-    if(L2.railHolding){
-      L2.railT += dt;
-      if(L2.railT >= CONFIG.lvl2.railHold){
-        L2.railHolding = false;
-        el.railBtn.classList.remove('hold');
-        setL2Phase('swipe');
+    if(L2.relSide){
+      L2.relT += dt;
+      if(L2.relT > C.releaseWindow){
+        l2Miss('松手太久，另一只手撑不住');
       }
+    }else if(L2.down.L && L2.down.R){
+      L2.settleT += dt;
     }
-  }else if(L2.phase === 'enter'){
-    const k = Math.min(1, L2.phaseT / 0.5);
+    if(L2.phase === 'grip' && L2.noteT <= 0) l2SetTask(l2TaskText());
+    // 节拍提示音：稳住之后每拍轻响一声，提示该换手了
+    if(now - L2.beatAt > BEAT_MS * 4) L2.beatAt = now + BEAT_MS;
+    else if(now >= L2.beatAt){
+      L2.beatAt += BEAT_MS;
+      if(!L2.relSide && L2.settleT >= C.settle) Sfx.tick(false);
+    }
+  }else if(L2.phase === 'climb'){
+    const C = CONFIG.lvl2;
+    L2.climbT += dt;
+    const k = Math.min(1, L2.climbT / C.climbT);
     L2.fx = L2.fromX + (L2.toX - L2.fromX) * easeInOutCubic(k);
-    L2.fy = L2.fromY + (L2.toY - L2.fromY) * k;
-    if(k >= 1) l2Win();
+    L2.fy = L2.fromY + (L2.toY - L2.fromY) * easeInOutCubic(k) + Math.sin(Math.PI * k) * 0.18;
+    if(k >= 1){
+      L2.fx = L2.toX;
+      L2.fy = L2.toY;
+      if(L2.step >= C.points.length - 1) l2Win();
+      else setL2Phase('grip');
+    }
   }else if(L2.phase === 'miss'){
     if(L2.phaseT >= 0.9) l2Respawn();
   }
@@ -980,6 +1037,7 @@ function updateLevel2(dt, now){
   }
   if(bus) bus.root.position.y = 0.012 * Math.sin(now * 0.008);
 
+  l2ApplyHint();
   l2Camera(dt);
   updateL2HUD();
 }
@@ -1155,8 +1213,6 @@ addEventListener('keydown', e=>{
   if(G.level === 2){
     if(k === 'arrowleft' || k === 'a'){ e.preventDefault(); l2PadDown('L'); }
     else if(k === 'arrowright' || k === 'd'){ e.preventDefault(); l2PadDown('R'); }
-    else if(k === ' ' || k === 's'){ e.preventDefault(); l2RailDown(); }
-    else if(k === 'arrowup' || k === 'w'){ e.preventDefault(); l2Swipe(); }
     else if(k === 'r' && G.over) startGame(2);
     return;
   }
@@ -1170,7 +1226,6 @@ addEventListener('keyup', e=>{
   const k = e.key.toLowerCase();
   if(k === 'arrowleft' || k === 'a') l2PadUp('L');
   else if(k === 'arrowright' || k === 'd') l2PadUp('R');
-  else if(k === ' ' || k === 's') l2RailUp();
 });
 
 for(const [id, side] of [['btnL', 'L'], ['btnR', 'R']]){
@@ -1185,26 +1240,7 @@ for(const [id, side] of [['btnL', 'L'], ['btnR', 'R']]){
   node.addEventListener('contextmenu', e=>e.preventDefault());
 }
 
-// 第二关：长按扶手
-el.railBtn.addEventListener('pointerdown', e=>{ e.preventDefault(); l2RailDown(); }, { passive: false });
-el.railBtn.addEventListener('pointerup', ()=>l2RailUp());
-el.railBtn.addEventListener('pointercancel', ()=>l2RailUp());
-el.railBtn.addEventListener('contextmenu', e=>e.preventDefault());
-
-// 第二关：上滑手势
-document.addEventListener('pointerdown', e=>{
-  if(G.level !== 2 || L2.phase !== 'swipe') return;
-  L2.swipeY0 = e.clientY;
-}, { passive: true });
-document.addEventListener('pointermove', e=>{
-  if(G.level !== 2 || L2.phase !== 'swipe' || L2.swipeY0 === null) return;
-  if(L2.swipeY0 - e.clientY >= CONFIG.lvl2.swipeDist){
-    L2.swipeY0 = null;
-    l2Swipe();
-  }
-}, { passive: true });
-document.addEventListener('pointerup', ()=>{ L2.swipeY0 = null; }, { passive: true });
-
+// 第二关：两只手各自一个按钮，按住/松开由 pointerdown / pointerup 驱动
 el.homeBtn.addEventListener('click', ()=>showLevels());
 el.backHomeBtn.addEventListener('click', ()=>showHome());
 el.lv1.addEventListener('click', ()=>startGame(1));
