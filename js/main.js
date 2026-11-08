@@ -275,6 +275,7 @@ const Sfx = {
 // ============================================================
 const G = {
   ready: false, started: false, over: false,
+  screen: 'home',           // home | levels | game | end
   state: 'idle',            // idle | step | fall | getup | win | lose
   x: 0, stepFrom: 0, stepTo: 0, stepT: 1, stepSide: null,
   hasStepped: false, lastSide: null, lastClickAt: 0,
@@ -316,6 +317,14 @@ const el = {
   falls    : document.getElementById('falls'),
   perfects : document.getElementById('perfects'),
   overlay  : document.getElementById('overlay'),
+  panelHome: document.getElementById('panelHome'),
+  panelLevels: document.getElementById('panelLevels'),
+  panelEnd : document.getElementById('panelEnd'),
+  homeBtn  : document.getElementById('homeBtn'),
+  lv1      : document.getElementById('lv1'),
+  backHomeBtn: document.getElementById('backHomeBtn'),
+  ovHomeBtn: document.getElementById('ovHomeBtn'),
+  homeChip : document.getElementById('homeChip'),
   ovTitle  : document.getElementById('ovTitle'),
   ovDesc   : document.getElementById('ovDesc'),
   ovBtn    : document.getElementById('ovBtn'),
@@ -329,16 +338,15 @@ const el = {
 function easeInOutCubic(t){ return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
 function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
 
-function resetGame(){
-  G.started = true; G.over = false; G.state = 'idle';
+function resetState(){
+  G.over = false; G.state = 'idle';
   G.x = 0; G.stepFrom = 0; G.stepTo = 0; G.stepT = 1; G.stepSide = null;
   G.hasStepped = false; G.lastSide = null; G.lastClickAt = 0;
-  G.fallKind = null; G.fallT = 0; G.upT = 0;
+  G.fallKind = null; G.fallT = 0; G.upT = 0; G.fallAngle = 0;
   G.steps = 0; G.falls = 0; G.perfects = 0; G.tickCount = 0;
-  G.busX = CONFIG.bus.gapStart; G.busSpeed = CONFIG.bus.speed;
+  G.busX = CONFIG.bus.gapStart; G.busSpeed = 0;
   G.camX = CONFIG.cam.leadX;
   G.camZ = CONFIG.cam.z;
-  G.beatAt = performance.now() + BEAT_MS;
 
   if(frog){
     frog.root.position.set(0, 0, 0);
@@ -350,15 +358,47 @@ function resetGame(){
     }
   }
   if(bus) bus.root.position.x = G.busX;
-  Sfx.init();
   updateHUD();
 }
 
+function resetGame(){
+  resetState();
+  G.started = true;
+  G.busSpeed = CONFIG.bus.speed;
+  G.beatAt = performance.now() + BEAT_MS;
+  Sfx.init();
+}
+
+// 主页面：不进入关卡，3D 街景做背景
+function showHome(){
+  G.screen = 'home'; G.started = false;
+  document.body.classList.remove('ingame');
+  resetState();
+  el.panelHome.hidden = false;
+  el.panelLevels.hidden = true;
+  el.panelEnd.hidden = true;
+  el.overlay.classList.add('show');
+}
+
+// 关卡列表
+function showLevels(){
+  G.screen = 'levels'; G.started = false;
+  document.body.classList.remove('ingame');
+  el.panelHome.hidden = true;
+  el.panelLevels.hidden = false;
+  el.panelEnd.hidden = true;
+  el.overlay.classList.add('show');
+}
+
 function showOverlay(title, desc, btnText){
+  G.screen = 'end';
   el.ovTitle.innerHTML = title;
   el.ovDesc.innerHTML = desc;
-  el.ovList.style.display = 'none';
   el.ovBtn.textContent = btnText;
+  el.panelHome.hidden = true;
+  el.panelLevels.hidden = true;
+  el.panelEnd.hidden = false;
+  document.body.classList.remove('ingame');
   el.overlay.classList.add('show');
 }
 
@@ -654,6 +694,25 @@ function update(dt, now){
     G.camX += (wantX - G.camX) * (1 - Math.exp(-dt * CONFIG.cam.follow));
     G.camZ += (wantZ - G.camZ) * (1 - Math.exp(-dt * CONFIG.cam.follow));
   }
+  else if(G.ready){
+    // 主页面 / 关卡列表：镜头缓慢漂移，让 Street 有生气
+    const gap = Math.max(0, G.busX - G.x);
+    let wantX, wantZ;
+    if(portrait){
+      const halfNeed = (gap + CONFIG.bus.length * 0.5) * 0.5;
+      const hFov = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(CONFIG.cam.fov) * 0.5) * camera.aspect);
+      wantZ = THREE.MathUtils.clamp(halfNeed / Math.tan(hFov * 0.5), CONFIG.cam.z, 30);
+      wantX = G.x + Math.min(gap * 0.45, 3.4);
+    }else{
+      wantX = G.x + CONFIG.cam.leadX + 2.0;   // 首页让奶蛙偏左，别被面板挡住
+      wantZ = CONFIG.cam.z;
+    }
+    const drift = Math.sin(now * 0.00045);
+    wantX += drift * (portrait ? 0.9 : 1.9);
+    wantZ += drift * (portrait ? 0.5 : 0.35);
+    G.camX += (wantX - G.camX) * (1 - Math.exp(-dt * 2.2));
+    G.camZ += (wantZ - G.camZ) * (1 - Math.exp(-dt * 2.2));
+  }
   camera.position.x = G.camX;
   camera.position.y = CONFIG.cam.y;
   camera.position.z = G.camZ;
@@ -708,11 +767,18 @@ for(const [id, side] of [['btnL', 'L'], ['btnR', 'R']]){
   node.addEventListener('contextmenu', e=>e.preventDefault());
 }
 
+el.homeBtn.addEventListener('click', ()=>showLevels());
+el.backHomeBtn.addEventListener('click', ()=>showHome());
+el.lv1.addEventListener('click', ()=>startGame());
 el.ovBtn.addEventListener('click', ()=>startGame());
+el.ovHomeBtn.addEventListener('click', ()=>showHome());
+el.homeChip.addEventListener('click', ()=>showHome());
 
 function startGame(){
   if(!G.ready) return;      // 素材还没加载完
+  G.screen = 'game';
   el.overlay.classList.remove('show');
+  document.body.classList.add('ingame');
   resetGame();
 }
 
@@ -739,6 +805,7 @@ async function boot(){
 
     G.ready = true;
     el.loading.classList.remove('show');
+    showHome();          // 先回主页面，不直接进关卡
     frame();
 
   }catch(err){
