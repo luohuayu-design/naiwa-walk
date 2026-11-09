@@ -296,6 +296,18 @@ const CONFIG = {
   lvl45 : {
     x: 2.0, holdTime: 2.0, steps: 8, claps: 8, jumps: 4, busX: 16.0,
   },
+  // 第四十六关：放风筝（交替拽线，把风筝留在绿带里共 8 秒）
+  lvl46 : {
+    x: 2.0, need: 8.0, band0: 2.0, band1: 3.0, tug: 1.50, grav: 2.20, cool: 0.20, busX: 16.0,
+  },
+  // 第四十七关：打地鼠（按亮起来的部位，共 12 只）
+  lvl47 : { x: 2.0, rounds: 12, t0: 1.10, t1: 0.62, busX: 16.0 },
+  // 第四十八关：爬树摘苹果（按提示交替用四个部位往上爬 12 级）
+  lvl48 : { x: 2.0, rungs: 12, rise: 0.26, busX: 16.0 },
+  // 第四十九关：拔河（左右手交替拉绳，把进度拉满）
+  lvl49 : { x: 2.0, gain: 0.09, decay: 0.05, rivalT: 2.60, rivalPull: 0.12, busX: 16.0 },
+  // 第五十关：毕业大考（24 个限时指令 + 最后双手按住）
+  lvl50 : { x: 2.0, cues: 24, t0: 1.45, t1: 0.70, hold: 1.80, busX: 16.0 },
 };
 const BEAT_MS = 60000 / CONFIG.beat.bpm;
 
@@ -652,6 +664,11 @@ const el = {
   lv43     : document.getElementById('lv43'),
   lv44     : document.getElementById('lv44'),
   lv45     : document.getElementById('lv45'),
+  lv46     : document.getElementById('lv46'),
+  lv47     : document.getElementById('lv47'),
+  lv48     : document.getElementById('lv48'),
+  lv49     : document.getElementById('lv49'),
+  lv50     : document.getElementById('lv50'),
   l5Seq    : document.getElementById('l5Seq'),
   l7Zone   : document.getElementById('l7Zone'),
   l9Zone   : document.getElementById('l9Zone'),
@@ -10919,6 +10936,971 @@ function updateLevel45(dt, now){
   l45Camera(dt);
 }
 
+// ============================================================
+// 第四十六关：奶蛙放风筝
+//
+// 左手和右手交替往上拽线，把风筝保持在半空的绿带里。
+// 累计留空 8 秒就成功，风会时不时把风筝往下压。
+// ============================================================
+const L46 = {
+  active: false, done: false, h: 2.40, hv: 0, bandT: 0, misses: 0, elapsed: 0,
+  lastHand: '', cool: 0, windT: 1.8, props: null, kite: null, string: null, hud: '', task: '',
+};
+window.__l46 = L46;
+
+function l46SetTask(t){
+  if(!t || L46.task === t) return;
+  L46.task = t;
+  if(el.l2Task) el.l2Task.textContent = t;
+}
+
+function updateL46HUD(){
+  const key = L46.elapsed.toFixed(1) + '/' + L46.bandT.toFixed(1) + '/' + L46.misses;
+  if(key === L46.hud) return;
+  L46.hud = key;
+  if(el.l2Time) el.l2Time.textContent = L46.elapsed.toFixed(1);
+  if(el.l2Step) el.l2Step.textContent = L46.bandT.toFixed(1) + 's';
+  if(el.l2Miss) el.l2Miss.textContent = L46.misses;
+}
+
+function buildL46Props(){
+  if(L46.props) return L46.props;
+  const C = CONFIG.lvl46;
+  const g = new THREE.Group();
+  L46.string = addBox(0.035, 1, 0.035, 0xf3f6fb, C.x + 1.0, 1.9, 0, g);
+  const kite = new THREE.Group();
+  const body = addBox(0.56, 0.56, 0.05, 0xffd93d, 0, 0, 0, kite);
+  body.rotation.z = Math.PI / 4;
+  addBox(0.12, 0.12, 0.06, 0xe8505a, 0, 0, 0.03, kite);
+  addBox(0.05, 0.36, 0.05, 0xe8505a, -0.12, -0.52, 0.02, kite);
+  addBox(0.05, 0.26, 0.05, 0x3ddc84, 0.10, -0.68, 0.02, kite);
+  kite.position.set(C.x + 1.80, C.h, 0);
+  g.add(kite);
+  L46.kite = kite;
+  const band = new THREE.Mesh(
+    new THREE.BoxGeometry(1.60, 1.00, 0.02),
+    new THREE.MeshBasicMaterial({ color: 0x3ddc84, transparent: true, opacity: 0.16 })
+  );
+  band.position.set(C.x + 1.80, 2.50, -0.55);
+  g.add(band);
+  g.visible = false;
+  scene.add(g);
+  L46.props = g;
+  return g;
+}
+
+function startLevel46(){
+  const C = CONFIG.lvl46;
+  resetAllLevels();
+  L46.active = true; L46.done = false;
+  L46.h = 2.40; L46.hv = 0; L46.bandT = 0;
+  L46.misses = 0; L46.elapsed = 0;
+  L46.lastHand = ''; L46.cool = 0; L46.windT = 1.8;
+  L46.hud = ''; L46.task = '';
+  buildL46Props().visible = true;
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  document.body.classList.add('level46');
+  setSky(0xdcefff);
+  setNight(false);
+  setLabels('用时', '留空');
+  setBtnText(el.btnL, '↑', '左手');
+  setBtnText(el.btnR, '↑', '右手');
+  resetFrogAt(C.x, 0);
+  G.camX = C.x + 1.3; G.camZ = CONFIG.cam.z; G.camY = CONFIG.cam.y;
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.add('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+  l46SetTask('左右手交替拽线，把风筝留在绿带里');
+  updateL46HUD();
+  Sfx.init();
+}
+
+function resetL46Scene(){
+  document.body.classList.remove('level46');
+  L46.active = false; L46.done = false;
+  if(L46.props) L46.props.visible = false;
+  L46.hud = ''; L46.task = '';
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+}
+
+function l46Tug(side){
+  if(G.level !== 46 || !L46.active || L46.done) return;
+  if(L46.cool > 0) return;
+  L46.cool = CONFIG.lvl46.cool;
+  if(L46.lastHand === side){
+    L46.misses++;
+    Sfx.thud();
+    updateL46HUD();
+    l46SetTask('左右手要交替，换另一只手拽');
+    return;
+  }
+  L46.lastHand = side;
+  L46.hv += CONFIG.lvl46.tug;
+  Sfx.tick();
+  updateL46HUD();
+  l46SetTask('稳住！让风筝停在绿带里');
+}
+
+function l46Win(){
+  if(L46.done) return;
+  L46.done = true; L46.active = false;
+  Sfx.win();
+  l46SetTask('🎉 风筝稳稳飞在半空！');
+  const used = L46.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('🪁 风筝飞起来啦！',
+      '用时 <b>' + used + '</b> 秒 · 留空 <b>' + CONFIG.lvl46.need.toFixed(1) + '</b> 秒 · 拽错手 <b>' + L46.misses + '</b> 次', '再放一次');
+  }, 1500);
+}
+
+function l46Pose(dt, now){
+  baseTargets();
+  const C = CONFIG.lvl46;
+  TGT.spine.x = -0.10;
+  TGT.armL.z = 1.30; TGT.armR.z = -1.30;
+  TGT.legL.z = -0.14; TGT.legR.z = 0.14;
+  if(L46.kite){
+    const kx = C.x + 1.80 + Math.sin(now * 0.003) * 0.08;
+    L46.kite.position.set(kx, L46.h, 0);
+    L46.kite.rotation.z = Math.sin(now * 0.0025) * 0.15;
+  }
+  if(L46.string){
+    const ax = C.x + 0.20, ay = 1.40;
+    const kx = C.x + 1.80, ky = L46.h;
+    const dx = kx - ax, dy = ky - ay;
+    const len = Math.max(0.05, Math.hypot(dx, dy));
+    L46.string.position.set((ax + kx) / 2, (ay + ky) / 2, 0);
+    L46.string.rotation.z = Math.atan2(dy, dx) - Math.PI / 2;
+    L46.string.scale.y = len;
+  }
+  if(frog) frog.root.position.set(C.x, 0, 0);
+  applyPose(dt);
+}
+
+function l46Camera(dt){
+  camFollow(dt, CONFIG.lvl46.x + 1.3, 3.0, 2.00);
+}
+
+function updateLevel46(dt, now){
+  const C = CONFIG.lvl46;
+  if(L46.active && !L46.done){
+    L46.elapsed += dt;
+    L46.cool = Math.max(0, L46.cool - dt);
+    L46.hv -= C.grav * dt;
+    L46.h += L46.hv * dt;
+    if(L46.h < 1.50){ L46.h = 1.50; if(L46.hv < 0) L46.hv = 0; }
+    if(L46.h > 3.90){ L46.h = 3.90; if(L46.hv > 0) L46.hv = 0; }
+    L46.windT -= dt;
+    if(L46.windT <= 0){
+      L46.windT = 2.4 + Math.random() * 1.2;
+      L46.hv -= 0.55;
+      Sfx.tick();
+    }
+    if(L46.h >= C.band0 && L46.h <= C.band1) L46.bandT += dt;
+    if(L46.bandT >= C.need){ l46Win(); return; }
+    if(el.l2ProgFill) el.l2ProgFill.style.width = (L46.bandT / C.need * 100).toFixed(1) + '%';
+  }
+  updateL46HUD();
+  l46Pose(dt, now);
+  l46Camera(dt);
+}
+
+// ============================================================
+// 第四十七关：奶蛙打地鼠
+//
+// 四只地鼠从左到右对应左手、左脚、右脚、右手。
+// 谁冒头就按对应部位，12 只越来越快。
+// ============================================================
+const L47 = {
+  active: false, done: false, idx: 0, cue: '', t: 0, cueLen: 1.1, popT: 1,
+  misses: 0, elapsed: 0, props: null, moles: [], hud: '', task: '', seqKey: -1,
+};
+window.__l47 = L47;
+
+const L47_CODES = ['HL', 'FL', 'FR', 'HR'];
+const L47_SEQ_IDX = [0, 1, 3, 2, 1, 3, 0, 2, 1, 0, 3, 2];
+const L47_SEQ = L47_SEQ_IDX.map(i => L47_CODES[i]);
+
+function l47CueLen(i){
+  const C = CONFIG.lvl47;
+  const k = Math.max(0, Math.min(1, i / Math.max(1, C.rounds - 1)));
+  return C.t0 + (C.t1 - C.t0) * k;
+}
+
+function l47SetTask(t){
+  if(!t || L47.task === t) return;
+  L47.task = t;
+  if(el.l2Task) el.l2Task.textContent = t;
+}
+
+function updateL47HUD(){
+  const key = L47.elapsed.toFixed(1) + '/' + L47.idx + '/' + L47.misses;
+  if(key === L47.hud) return;
+  L47.hud = key;
+  if(el.l2Time) el.l2Time.textContent = L47.elapsed.toFixed(1);
+  if(el.l2Step) el.l2Step.textContent = L47.idx + '/' + CONFIG.lvl47.rounds;
+  if(el.l2Miss) el.l2Miss.textContent = L47.misses;
+}
+
+function l47RenderSeq(){
+  if(!el.l5Seq) return;
+  const key = L47.idx + '/' + L47.cue;
+  if(key === L47.seqKey) return;
+  L47.seqKey = key;
+  if(!L47.cue){ el.l5Seq.innerHTML = ''; return; }
+  const cls = 'l5chip ' + (L47.cue[0] === 'H' ? 'hand' : 'foot') + ' now';
+  el.l5Seq.innerHTML = '<span class="' + cls + '">' + L5_LIMB[L47.cue] + '</span>';
+}
+
+function buildL47Props(){
+  if(L47.props) return L47.props;
+  const C = CONFIG.lvl47;
+  const g = new THREE.Group();
+  L47.moles = [];
+  for(let i = 0; i < 4; i++){
+    const x = C.x + [-1.35, -0.45, 0.45, 1.35][i];
+    const hole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.24, 0.24, 0.06, 14),
+      new THREE.MeshLambertMaterial({ color: 0x2c3444 })
+    );
+    hole.position.set(x, 0.03, -0.42);
+    g.add(hole);
+    const mole = new THREE.Group();
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.19, 12, 10),
+      new THREE.MeshLambertMaterial({ color: 0xc08a52 })
+    );
+    head.position.y = 0.16;
+    mole.add(head);
+    for(const ex of [-0.07, 0.07]){
+      const eye = new THREE.Mesh(
+        new THREE.SphereGeometry(0.05, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0xf3f6fb })
+      );
+      eye.position.set(ex, 0.22, 0.14);
+      mole.add(eye);
+    }
+    mole.position.set(x, -0.30, -0.42);
+    mole.scale.setScalar(1.30);
+    mole.visible = false;
+    g.add(mole);
+    L47.moles.push(mole);
+  }
+  g.visible = false;
+  scene.add(g);
+  L47.props = g;
+  return g;
+}
+
+function l47NextCue(){
+  L47.cue = L47_SEQ[L47.idx];
+  L47.cueLen = l47CueLen(L47.idx);
+  L47.t = L47.cueLen;
+  L47.popT = 0;
+  L47.seqKey = -1;
+  l47RenderSeq();
+  l47SetTask('打中冒头的地鼠！');
+}
+
+function startLevel47(){
+  const C = CONFIG.lvl47;
+  resetAllLevels();
+  L47.active = true; L47.done = false;
+  L47.idx = 0; L47.misses = 0; L47.elapsed = 0;
+  L47.hud = ''; L47.task = ''; L47.seqKey = -1;
+  buildL47Props().visible = true;
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  document.body.classList.add('level47');
+  setSky(0xdcefff);
+  setNight(false);
+  setLabels('用时', '地鼠');
+  setBtnText(el.btnL, '↑', '左手');
+  setBtnText(el.btnR, '↑', '右手');
+  setBtnText(el.footL, '↓', '左脚');
+  setBtnText(el.footR, '↓', '右脚');
+  resetFrogAt(C.x, 0);
+  G.camX = C.x + 0.25; G.camZ = CONFIG.cam.z; G.camY = CONFIG.cam.y;
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.add('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+  l47NextCue();
+  updateL47HUD();
+  Sfx.init();
+}
+
+function resetL47Scene(){
+  document.body.classList.remove('level47');
+  L47.active = false; L47.done = false;
+  if(L47.props) L47.props.visible = false;
+  L47.hud = ''; L47.task = ''; L47.seqKey = -1;
+  if(el.l5Seq) el.l5Seq.innerHTML = '';
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+}
+
+function l47Advance(){
+  L47.idx++;
+  updateL47HUD();
+  if(L47.idx >= CONFIG.lvl47.rounds){ l47Win(); return; }
+  l47NextCue();
+}
+
+function l47Press(code){
+  if(G.level !== 47 || !L47.active || L47.done) return;
+  if(code !== L47.cue){
+    L47.misses++;
+    Sfx.thud();
+    updateL47HUD();
+    l47SetTask('不对，地鼠是' + L5_LIMB[L47.cue]);
+    return;
+  }
+  Sfx.perfect();
+  l47Advance();
+}
+
+function l47Win(){
+  if(L47.done) return;
+  L47.done = true; L47.active = false;
+  Sfx.win();
+  if(el.l5Seq) el.l5Seq.innerHTML = '';
+  L47.seqKey = -1;
+  l47SetTask('🎉 十二只地鼠全部打中！');
+  const used = L47.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('🐹 打地鼠完成！',
+      '用时 <b>' + used + '</b> 秒 · 打空 <b>' + L47.misses + '</b> 次', '再打一轮');
+  }, 1500);
+}
+
+function l47Pose(dt, now){
+  baseTargets();
+  const t = now * 0.0024;
+  TGT.spine.x = 0.05;
+  TGT.armL.z = 0.40 + Math.sin(t) * 0.05;
+  TGT.armR.z = -0.40 - Math.sin(t) * 0.05;
+  TGT.legL.z = -0.06; TGT.legR.z = 0.06;
+  const mi = L47_SEQ_IDX[Math.min(L47.idx, L47_SEQ_IDX.length - 1)];
+  const pop = Math.min(1, L47.popT / 0.12);
+  for(let i = 0; i < L47.moles.length; i++){
+    const m = L47.moles[i];
+    m.visible = (i === mi && !L47.done);
+    if(i === mi) m.position.y = -0.34 + pop * 0.72;
+  }
+  if(frog) frog.root.position.set(CONFIG.lvl47.x, 0, 0);
+  applyPose(dt);
+}
+
+function l47Camera(dt){
+  camFollow(dt, CONFIG.lvl47.x + 0.25, 3.5, 1.25);
+}
+
+function updateLevel47(dt, now){
+  const C = CONFIG.lvl47;
+  if(L47.active && !L47.done){
+    L47.elapsed += dt;
+    if(L47.popT < 1) L47.popT = Math.min(1, L47.popT + dt / 0.12);
+    L47.t -= dt;
+    if(L47.t <= 0){
+      L47.misses++;
+      Sfx.thud();
+      updateL47HUD();
+      l47SetTask('太慢了，地鼠跑掉了');
+      l47Advance();
+    }
+    if(el.l2ProgFill && !L47.done) el.l2ProgFill.style.width = Math.max(0, L47.t / L47.cueLen * 100).toFixed(1) + '%';
+  }
+  updateL47HUD();
+  l47Pose(dt, now);
+  l47Camera(dt);
+}
+
+// ============================================================
+// 第四十八关：奶蛙爬树摘苹果
+//
+// 按提示用对应的手或脚一格一格往上爬，12 格爬到树顶。
+// ============================================================
+const L48 = {
+  active: false, done: false, idx: 0, dispY: 0, misses: 0, elapsed: 0,
+  props: null, rungs: [], hud: '', task: '', seqKey: -1,
+};
+window.__l48 = L48;
+
+const L48_PLAN = ['HL', 'FR', 'FL', 'HR', 'HR', 'FL', 'FR', 'HL', 'HL', 'FR', 'FL', 'HR'];
+
+function l48SetTask(t){
+  if(!t || L48.task === t) return;
+  L48.task = t;
+  if(el.l2Task) el.l2Task.textContent = t;
+}
+
+function updateL48HUD(){
+  const key = L48.elapsed.toFixed(1) + '/' + L48.idx + '/' + L48.misses;
+  if(key === L48.hud) return;
+  L48.hud = key;
+  if(el.l2Time) el.l2Time.textContent = L48.elapsed.toFixed(1);
+  if(el.l2Step) el.l2Step.textContent = L48.idx + '/' + CONFIG.lvl48.rungs;
+  if(el.l2Miss) el.l2Miss.textContent = L48.misses;
+}
+
+function l48RenderSeq(){
+  if(!el.l5Seq) return;
+  if(L48.idx >= L48_PLAN.length){ el.l5Seq.innerHTML = ''; return; }
+  const code = L48_PLAN[L48.idx];
+  if(code === L48.seqKey) return;
+  L48.seqKey = code;
+  const cls = 'l5chip ' + (code[0] === 'H' ? 'hand' : 'foot') + ' now';
+  el.l5Seq.innerHTML = '<span class="' + cls + '">' + L5_LIMB[code] + '</span>';
+}
+
+function buildL48Props(){
+  if(L48.props) return L48.props;
+  const C = CONFIG.lvl48;
+  const g = new THREE.Group();
+  addBox(0.55, 3.70, 0.45, 0x8a6a42, C.x, 1.85, -0.55, g);
+  addBox(1.90, 0.50, 0.50, 0x5fae62, C.x, 3.85, -0.55, g);
+  addBox(1.10, 0.45, 0.45, 0x5fae62, C.x - 0.55, 4.20, -0.60, g);
+  addBox(1.10, 0.45, 0.45, 0x5fae62, C.x + 0.55, 4.15, -0.60, g);
+  L48.rungs = [];
+  for(let i = 0; i < C.rungs; i++){
+    const r = addBox(0.66, 0.07, 0.30, 0xc9a06a, C.x, 0.26 * (i + 1), -0.40, g);
+    L48.rungs.push(r);
+  }
+  for(const p of [[-0.45, 3.55], [0.42, 3.80], [0.05, 4.05]]){
+    const a = new THREE.Mesh(
+      new THREE.SphereGeometry(0.12, 10, 8),
+      new THREE.MeshLambertMaterial({ color: 0xe8505a })
+    );
+    a.position.set(C.x + p[0], p[1], -0.52);
+    g.add(a);
+  }
+  g.visible = false;
+  scene.add(g);
+  L48.props = g;
+  return g;
+}
+
+function l48Next(){
+  L48.seqKey = -1;
+  l48RenderSeq();
+  if(L48.idx >= L48_PLAN.length){ l48SetTask('爬到顶了，伸手摘苹果！'); return; }
+  l48SetTask('下一个：' + L5_LIMB[L48_PLAN[L48.idx]]);
+}
+
+function startLevel48(){
+  const C = CONFIG.lvl48;
+  resetAllLevels();
+  L48.active = true; L48.done = false;
+  L48.idx = 0; L48.dispY = 0;
+  L48.misses = 0; L48.elapsed = 0;
+  L48.hud = ''; L48.task = ''; L48.seqKey = -1;
+  buildL48Props().visible = true;
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  document.body.classList.add('level48');
+  setSky(0xdcefff);
+  setNight(false);
+  setLabels('用时', '树格');
+  setBtnText(el.btnL, '↑', '左手');
+  setBtnText(el.btnR, '↑', '右手');
+  setBtnText(el.footL, '↓', '左脚');
+  setBtnText(el.footR, '↓', '右脚');
+  resetFrogAt(C.x, 0);
+  G.camX = C.x + 0.2; G.camZ = CONFIG.cam.z; G.camY = CONFIG.cam.y;
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.add('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+  l48Next();
+  updateL48HUD();
+  Sfx.init();
+}
+
+function resetL48Scene(){
+  document.body.classList.remove('level48');
+  L48.active = false; L48.done = false;
+  if(L48.props) L48.props.visible = false;
+  L48.hud = ''; L48.task = ''; L48.seqKey = -1;
+  if(el.l5Seq) el.l5Seq.innerHTML = '';
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+}
+
+function l48Press(code){
+  if(G.level !== 48 || !L48.active || L48.done) return;
+  if(L48.idx >= L48_PLAN.length) return;
+  if(code !== L48_PLAN[L48.idx]){
+    L48.misses++;
+    Sfx.thud();
+    updateL48HUD();
+    l48SetTask('不对，这一格要用' + L5_LIMB[L48_PLAN[L48.idx]]);
+    return;
+  }
+  L48.idx++;
+  Sfx.step();
+  updateL48HUD();
+  if(L48.idx >= CONFIG.lvl48.rungs){ l48Win(); return; }
+  l48Next();
+}
+
+function l48Win(){
+  if(L48.done) return;
+  L48.done = true; L48.active = false;
+  Sfx.win();
+  if(el.l5Seq) el.l5Seq.innerHTML = '';
+  L48.seqKey = -1;
+  l48SetTask('🎉 爬到树顶，苹果摘到手！');
+  const used = L48.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('🍎 苹果摘到啦！',
+      '用时 <b>' + used + '</b> 秒 · 踩空 <b>' + L48.misses + '</b> 次', '再爬一次');
+  }, 1500);
+}
+
+function l48Pose(dt, now){
+  baseTargets();
+  const C = CONFIG.lvl48;
+  const targetY = L48.idx * C.rise;
+  L48.dispY += (targetY - L48.dispY) * (1 - Math.exp(-dt * 10));
+  const t = now * 0.0024;
+  const up = L48.idx % 2 === 0;
+  TGT.spine.x = 0.10;
+  TGT.armL.z = up ? 1.15 : 0.45;
+  TGT.armR.z = up ? -0.45 : -1.15;
+  TGT.legL.z = up ? -0.10 : 0.30;
+  TGT.legR.z = up ? -0.30 : 0.10;
+  for(let i = 0; i < L48.rungs.length; i++){
+    const col = i < L48.idx ? 0x6b4a2f : (i === L48.idx ? 0xffd93d : 0xc9a06a);
+    L48.rungs[i].material.color.setHex(col);
+  }
+  if(frog) frog.root.position.set(C.x, L48.dispY, 0);
+  applyPose(dt);
+}
+
+function l48Camera(dt){
+  camFollow(dt, CONFIG.lvl48.x + 0.2, 2.7, 1.55 + L48.dispY);
+}
+
+function updateLevel48(dt, now){
+  const C = CONFIG.lvl48;
+  if(L48.active && !L48.done){
+    L48.elapsed += dt;
+    if(el.l2ProgFill) el.l2ProgFill.style.width = (L48.idx / C.rungs * 100).toFixed(1) + '%';
+    if(L48.seqKey === -1) l48RenderSeq();
+  }
+  updateL48HUD();
+  l48Pose(dt, now);
+  l48Camera(dt);
+}
+
+// ============================================================
+// 第四十九关：奶蛙拔河
+//
+// 左右手交替拉绳，把中间的小旗拉到自己这边。
+// 对手每隔一会儿也会往回拽，松劲了会被拉回去。
+// ============================================================
+const L49 = {
+  active: false, done: false, pull: 0, lastHand: '', cool: 0,
+  misses: 0, elapsed: 0, rivalT: 2.2, bounce: 0,
+  props: null, flag: null, rival: null, rope: null, hud: '', task: '',
+};
+window.__l49 = L49;
+
+function l49SetTask(t){
+  if(!t || L49.task === t) return;
+  L49.task = t;
+  if(el.l2Task) el.l2Task.textContent = t;
+}
+
+function updateL49HUD(){
+  const key = L49.elapsed.toFixed(1) + '/' + L49.pull.toFixed(2) + '/' + L49.misses;
+  if(key === L49.hud) return;
+  L49.hud = key;
+  if(el.l2Time) el.l2Time.textContent = L49.elapsed.toFixed(1);
+  if(el.l2Step) el.l2Step.textContent = Math.round(L49.pull * 100) + '%';
+  if(el.l2Miss) el.l2Miss.textContent = L49.misses;
+}
+
+function buildL49Props(){
+  if(L49.props) return L49.props;
+  const C = CONFIG.lvl49;
+  const g = new THREE.Group();
+  L49.rope = addBox(2.60, 0.08, 0.08, 0xe8dcb0, C.x + 1.85, 0.98, 0.02, g);
+  L49.flag = addBox(0.22, 0.34, 0.06, 0xe8505a, C.x + 1.85, 1.16, 0.05, g);
+  const rival = new THREE.Group();
+  addBox(1.30, 1.40, 0.85, 0x7d8ba5, 0, 0.72, 0, rival);
+  addBox(0.40, 0.50, 0.20, 0x596274, -0.55, 1.22, 0.45, rival);
+  addBox(0.40, 0.50, 0.20, 0x596274, 0.55, 1.22, 0.45, rival);
+  addBox(0.30, 0.34, 0.30, 0x596274, 0, 0.86, 0.50, rival);
+  for(const ex of [-0.27, 0.27]){
+    const eye = new THREE.Mesh(
+      new THREE.SphereGeometry(0.11, 10, 8),
+      new THREE.MeshBasicMaterial({ color: 0xf3f6fb })
+    );
+    eye.position.set(ex, 0.98, 0.44);
+    rival.add(eye);
+  }
+  rival.position.set(C.x + 3.25, 0, -0.55);
+  g.add(rival);
+  L49.rival = rival;
+  g.visible = false;
+  scene.add(g);
+  L49.props = g;
+  return g;
+}
+
+function startLevel49(){
+  const C = CONFIG.lvl49;
+  resetAllLevels();
+  L49.active = true; L49.done = false;
+  L49.pull = 0; L49.lastHand = ''; L49.cool = 0;
+  L49.misses = 0; L49.elapsed = 0; L49.rivalT = 2.2; L49.bounce = 0;
+  L49.hud = ''; L49.task = '';
+  buildL49Props().visible = true;
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  document.body.classList.add('level49');
+  setSky(0xdcefff);
+  setNight(false);
+  setLabels('用时', '进度');
+  setBtnText(el.btnL, '↑', '左手');
+  setBtnText(el.btnR, '↑', '右手');
+  resetFrogAt(C.x, 0);
+  G.camX = C.x + 1.4; G.camZ = CONFIG.cam.z; G.camY = CONFIG.cam.y;
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.add('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+  l49SetTask('左右手交替拉绳，把小旗拉过来');
+  updateL49HUD();
+  Sfx.init();
+}
+
+function resetL49Scene(){
+  document.body.classList.remove('level49');
+  L49.active = false; L49.done = false;
+  if(L49.props) L49.props.visible = false;
+  L49.hud = ''; L49.task = '';
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+}
+
+function l49Pull(side){
+  if(G.level !== 49 || !L49.active || L49.done) return;
+  const C = CONFIG.lvl49;
+  if(L49.cool > 0) return;
+  L49.cool = 0.12;
+  if(L49.lastHand === side){
+    L49.misses++;
+    Sfx.thud();
+    updateL49HUD();
+    l49SetTask('左右手要交替，换另一只手');
+    return;
+  }
+  L49.lastHand = side;
+  L49.pull = Math.min(1, L49.pull + C.gain);
+  Sfx.step();
+  updateL49HUD();
+  if(L49.pull >= 1){ l49Win(); return; }
+  l49SetTask('用力拉！还差 ' + Math.round((1 - L49.pull) * 100) + '%');
+}
+
+function l49Win(){
+  if(L49.done) return;
+  L49.done = true; L49.active = false;
+  Sfx.win();
+  l49SetTask('🎉 小旗拉过界，赢啦！');
+  const used = L49.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('🪢 拔河赢啦！',
+      '用时 <b>' + used + '</b> 秒 · 拉错手 <b>' + L49.misses + '</b> 次', '再来一局');
+  }, 1500);
+}
+
+function l49Pose(dt, now){
+  baseTargets();
+  const C = CONFIG.lvl49;
+  const t = now * 0.0024;
+  TGT.spine.x = -0.18;
+  TGT.armL.z = (L49.lastHand === 'L' ? 1.45 : 0.85) + Math.sin(t) * 0.05;
+  TGT.armR.z = -((L49.lastHand === 'R' ? 1.45 : 0.85) + Math.sin(t) * 0.05);
+  TGT.legL.z = -0.25; TGT.legR.z = 0.25;
+  if(L49.flag) L49.flag.position.x = C.x + 1.85 - L49.pull * 0.90;
+  if(L49.rival){
+    L49.rival.position.x = C.x + 3.25 + L49.pull * 0.25 + Math.sin(now * 0.012) * L49.bounce * 0.10;
+    L49.rival.rotation.z = Math.sin(now * 0.010) * 0.04;
+  }
+  if(L49.cool > 0) L49.cool -= dt;
+  if(frog) frog.root.position.set(C.x, 0, 0);
+  applyPose(dt);
+}
+
+function l49Camera(dt){
+  camFollow(dt, CONFIG.lvl49.x + 1.4, 3.4, 1.30);
+}
+
+function updateLevel49(dt, now){
+  const C = CONFIG.lvl49;
+  if(L49.active && !L49.done){
+    L49.elapsed += dt;
+    L49.pull = Math.max(0, L49.pull - C.decay * dt);
+    L49.bounce = Math.max(0, L49.bounce - dt);
+    L49.rivalT -= dt;
+    if(L49.rivalT <= 0){
+      L49.rivalT = C.rivalT;
+      L49.pull = Math.max(0, L49.pull - C.rivalPull);
+      L49.bounce = 0.45;
+      Sfx.thud();
+      l49SetTask('对手往回拽了，快拉！');
+    }
+    if(el.l2ProgFill) el.l2ProgFill.style.width = (L49.pull * 100).toFixed(1) + '%';
+  }
+  updateL49HUD();
+  l49Pose(dt, now);
+  l49Camera(dt);
+}
+
+// ============================================================
+// 第五十关：奶蛙毕业大考
+//
+// 24 个限时指令越来越快，全部按对后再双手按住 1.8 秒，
+// 礼花就会在终点上空炸开 —— 五十关全部完成。
+// ============================================================
+const L50 = {
+  active: false, done: false, idx: 0, phase: 'cue', cue: '', cueT: 0, cueLen: 1.45,
+  handL: false, handR: false, holdT: 0, misses: 0, elapsed: 0, burstT: 0,
+  props: null, parts: [], hud: '', task: '', seqKey: -1,
+};
+window.__l50 = L50;
+
+const L50_PLAN = ['HL', 'FR', 'HR', 'FL', 'FL', 'HR', 'HL', 'FR',
+  'HR', 'FL', 'HL', 'FR', 'FR', 'HL', 'FL', 'HR',
+  'HL', 'FR', 'HR', 'FL', 'FL', 'HR', 'HL', 'FR'];
+const L50_COLORS = [0xffd93d, 0x3ddc84, 0x3d8bf0, 0xe8505a, 0xff8a3d, 0xd93ddc];
+
+function l50CueLen(i){
+  const C = CONFIG.lvl50;
+  const k = Math.max(0, Math.min(1, i / Math.max(1, C.cues - 1)));
+  return C.t0 + (C.t1 - C.t0) * k;
+}
+
+function l50SetTask(t){
+  if(!t || L50.task === t) return;
+  L50.task = t;
+  if(el.l2Task) el.l2Task.textContent = t;
+}
+
+function updateL50HUD(){
+  const key = L50.elapsed.toFixed(1) + '/' + L50.idx + '/' + L50.phase + '/' + L50.misses;
+  if(key === L50.hud) return;
+  L50.hud = key;
+  if(el.l2Time) el.l2Time.textContent = L50.elapsed.toFixed(1);
+  if(el.l2Step) el.l2Step.textContent = Math.min(L50.idx, CONFIG.lvl50.cues) + '/' + CONFIG.lvl50.cues;
+  if(el.l2Miss) el.l2Miss.textContent = L50.misses;
+}
+
+function l50RenderSeq(){
+  if(!el.l5Seq) return;
+  const key = L50.phase + '/' + L50.idx;
+  if(key === L50.seqKey) return;
+  L50.seqKey = key;
+  if(L50.phase === 'hold'){
+    el.l5Seq.innerHTML = '<span class="l5chip hand now">左手</span><span class="l5arrow">+</span><span class="l5chip hand now">右手</span>';
+    return;
+  }
+  if(!L50.cue){ el.l5Seq.innerHTML = ''; return; }
+  const cls = 'l5chip ' + (L50.cue[0] === 'H' ? 'hand' : 'foot') + ' now';
+  el.l5Seq.innerHTML = '<span class="' + cls + '">' + L5_LIMB[L50.cue] + '</span>';
+}
+
+function buildL50Props(){
+  if(L50.props) return L50.props;
+  const C = CONFIG.lvl50;
+  const g = new THREE.Group();
+  addBox(0.10, 2.40, 0.10, 0x8fa0b8, C.x - 0.55, 1.20, -0.80, g);
+  addBox(0.10, 2.40, 0.10, 0x8fa0b8, C.x + 2.55, 1.20, -0.80, g);
+  addBox(3.30, 0.12, 0.12, 0x8fa0b8, C.x + 1.00, 2.38, -0.80, g);
+  for(let i = 0; i < 6; i++){
+    addBox(0.30, 0.42, 0.04, L50_COLORS[i], C.x - 0.05 + i * 0.52, 2.10, -0.74, g);
+  }
+  L50.parts = [];
+  for(let i = 0; i < 18; i++){
+    const p = new THREE.Mesh(
+      new THREE.SphereGeometry(0.07, 8, 8),
+      new THREE.MeshBasicMaterial({ color: L50_COLORS[i % L50_COLORS.length], transparent: true, opacity: 0 })
+    );
+    p.position.set(C.x + 2.3, 2.2, 0.4);
+    p.userData.vx = 0; p.userData.vy = 0;
+    p.visible = false;
+    g.add(p);
+    L50.parts.push(p);
+  }
+  g.visible = false;
+  scene.add(g);
+  L50.props = g;
+  return g;
+}
+
+function l50NextCue(){
+  L50.cue = L50_PLAN[L50.idx];
+  L50.cueLen = l50CueLen(L50.idx);
+  L50.cueT = L50.cueLen;
+  L50.phase = 'cue';
+  L50.seqKey = -1;
+  l50RenderSeq();
+  l50SetTask('第 ' + (L50.idx + 1) + ' 下：' + L5_LIMB[L50.cue] + '！');
+}
+
+function startLevel50(){
+  const C = CONFIG.lvl50;
+  resetAllLevels();
+  L50.active = true; L50.done = false;
+  L50.idx = 0; L50.phase = 'cue';
+  L50.handL = false; L50.handR = false; L50.holdT = 0;
+  L50.misses = 0; L50.elapsed = 0; L50.burstT = 0;
+  L50.hud = ''; L50.task = ''; L50.seqKey = -1;
+  buildL50Props().visible = true;
+  for(const p of L50.parts){ p.visible = false; p.material.opacity = 0; }
+
+  if(bus){ bus.root.visible = true; bus.root.position.x = C.busX; }
+  document.body.classList.add('level50');
+  setSky(0xdcefff);
+  setNight(false);
+  setLabels('用时', '指令');
+  setBtnText(el.btnL, '↑', '左手');
+  setBtnText(el.btnR, '↑', '右手');
+  setBtnText(el.footL, '↓', '左脚');
+  setBtnText(el.footR, '↓', '右脚');
+  resetFrogAt(C.x, 0);
+  G.camX = C.x + 1.2; G.camZ = CONFIG.cam.z; G.camY = CONFIG.cam.y;
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.add('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+  l50NextCue();
+  updateL50HUD();
+  Sfx.init();
+}
+
+function resetL50Scene(){
+  document.body.classList.remove('level50');
+  L50.active = false; L50.done = false;
+  L50.handL = false; L50.handR = false;
+  if(L50.props) L50.props.visible = false;
+  L50.hud = ''; L50.task = ''; L50.seqKey = -1;
+  if(el.l5Seq) el.l5Seq.innerHTML = '';
+  if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
+  if(el.l2ProgFill) el.l2ProgFill.style.width = '0%';
+}
+
+function l50Hand(side, down){
+  if(G.level !== 50) return;
+  if(side === 'L') L50.handL = !!down;
+  else L50.handR = !!down;
+}
+
+function l50EnterHold(){
+  L50.phase = 'hold';
+  L50.holdT = 0;
+  L50.idx = CONFIG.lvl50.cues;
+  L50.seqKey = -1;
+  l50RenderSeq();
+  l50SetTask('最后一步：双手按住 ' + CONFIG.lvl50.hold.toFixed(1) + ' 秒');
+  updateL50HUD();
+}
+
+function l50Advance(){
+  L50.idx++;
+  updateL50HUD();
+  if(L50.idx >= CONFIG.lvl50.cues){ l50EnterHold(); return; }
+  l50NextCue();
+}
+
+function l50Press(code){
+  if(G.level !== 50 || !L50.active || L50.done || L50.phase !== 'cue') return;
+  if(code !== L50.cue){
+    L50.misses++;
+    Sfx.thud();
+    updateL50HUD();
+    l50SetTask('不对，这一下是 ' + L5_LIMB[L50.cue]);
+    return;
+  }
+  Sfx.tick(true);
+  l50Advance();
+}
+
+function l50Win(){
+  if(L50.done) return;
+  L50.done = true; L50.active = false;
+  L50.burstT = 1.4;
+  for(const p of L50.parts){
+    p.visible = true;
+    p.material.opacity = 1;
+    const a = Math.random() * Math.PI * 2;
+    const s = 0.8 + Math.random() * 2.0;
+    p.userData.vx = Math.cos(a) * s;
+    p.userData.vy = 0.6 + Math.sin(a) * s;
+  }
+  Sfx.win();
+  l50SetTask('🎓 毕业大考通过！五十关全部完成！');
+  const used = L50.elapsed.toFixed(1);
+  setTimeout(()=>{
+    showOverlay('🎓 奶蛙毕业啦！',
+      '大考用时 <b>' + used + '</b> 秒 · 错过 <b>' + L50.misses + '</b> 下 · 你已经完成全部 <b>50</b> 关！', '再看一次礼花');
+  }, 1500);
+}
+
+function l50Pose(dt, now){
+  baseTargets();
+  const t = now * 0.0024;
+  const code = L50.phase === 'cue' ? L50.cue : '';
+  const hold = L50.phase === 'hold' || L50.done;
+  TGT.spine.x = 0.05;
+  TGT.armL.z = hold ? 1.45 : (code === 'HL' ? 1.25 : 0.40 + Math.sin(t) * 0.04);
+  TGT.armR.z = hold ? -1.45 : -((code === 'HR' ? 1.25 : 0.40) + Math.sin(t) * 0.04);
+  TGT.legL.z = code === 'FL' ? -0.32 : -0.06;
+  TGT.legR.z = code === 'FR' ? 0.32 : 0.06;
+  if(frog) frog.root.position.set(CONFIG.lvl50.x, 0, 0);
+  applyPose(dt);
+}
+
+function l50Camera(dt){
+  camFollow(dt, CONFIG.lvl50.x + 1.2, 2.8, 1.60);
+}
+
+function updateLevel50(dt, now){
+  const C = CONFIG.lvl50;
+  if(L50.active && !L50.done){
+    L50.elapsed += dt;
+    if(L50.phase === 'cue'){
+      L50.cueT -= dt;
+      if(L50.cueT <= 0){
+        L50.misses++;
+        Sfx.thud();
+        updateL50HUD();
+        l50SetTask('慢了，这一下是 ' + L5_LIMB[L50.cue]);
+        l50Advance();
+      }
+      if(L50.phase === 'cue' && el.l2ProgFill){
+        el.l2ProgFill.style.width = Math.max(0, L50.cueT / L50.cueLen * 100).toFixed(1) + '%';
+      }
+    }else if(L50.phase === 'hold'){
+      if(L50.handL && L50.handR){
+        L50.holdT += dt;
+        if(L50.holdT >= C.hold){ l50Win(); return; }
+      }else L50.holdT = Math.max(0, L50.holdT - dt * 0.5);
+      if(el.l2ProgFill) el.l2ProgFill.style.width = (L50.holdT / C.hold * 100).toFixed(1) + '%';
+    }
+  }
+  if(L50.burstT > 0){
+    L50.burstT -= dt;
+    const op = Math.max(0, L50.burstT / 1.4);
+    for(const p of L50.parts){
+      p.userData.vy -= 2.0 * dt;
+      p.position.x += p.userData.vx * dt;
+      p.position.y += p.userData.vy * dt;
+      p.material.opacity = op;
+    }
+  }
+  updateL50HUD();
+  l50Pose(dt, now);
+  l50Camera(dt);
+}
+
 // ---- 各关共用的小工具 ----
 function baseTargets(){
   TGT = {};
@@ -11021,9 +12003,14 @@ function resetAllLevels(){
   resetL43Scene();
   resetL44Scene();
   resetL45Scene();
+  resetL46Scene();
+  resetL47Scene();
+  resetL48Scene();
+  resetL49Scene();
+  resetL50Scene();
   if(el.l7Zone) el.l7Zone.style.display = 'none';
   if(el.l2ProgWrap) el.l2ProgWrap.classList.remove('on');
-  document.body.classList.remove('level2', 'level3', 'level4', 'level5', 'level6', 'level7', 'level8', 'level9', 'level10', 'level11', 'level12', 'level13', 'level14', 'level15', 'level16', 'level17', 'level18', 'level19', 'level20', 'level21', 'level22', 'level23', 'level24', 'level25', 'level26', 'level27', 'level28', 'level29', 'level30', 'level31', 'level32', 'level33', 'level34', 'level35', 'level36', 'level37', 'level38', 'level39', 'level40', 'level41', 'level42', 'level43', 'level44', 'level45');
+  document.body.classList.remove('level2', 'level3', 'level4', 'level5', 'level6', 'level7', 'level8', 'level9', 'level10', 'level11', 'level12', 'level13', 'level14', 'level15', 'level16', 'level17', 'level18', 'level19', 'level20', 'level21', 'level22', 'level23', 'level24', 'level25', 'level26', 'level27', 'level28', 'level29', 'level30', 'level31', 'level32', 'level33', 'level34', 'level35', 'level36', 'level37', 'level38', 'level39', 'level40', 'level41', 'level42', 'level43', 'level44', 'level45', 'level46', 'level47', 'level48', 'level49', 'level50');
   setLabels('剩余', '台阶');
   for(const b of [el.btnL, el.btnR, el.footL, el.footR]) if(b) b.classList.remove('want', 'drop');
 }
@@ -11034,6 +12021,11 @@ function resetAllLevels(){
 let lastT = performance.now();
 
 function update(dt, now){
+  if(G.level === 50){ updateLevel50(dt, now); return; }
+  if(G.level === 49){ updateLevel49(dt, now); return; }
+  if(G.level === 48){ updateLevel48(dt, now); return; }
+  if(G.level === 47){ updateLevel47(dt, now); return; }
+  if(G.level === 46){ updateLevel46(dt, now); return; }
   if(G.level === 45){ updateLevel45(dt, now); return; }
   if(G.level === 44){ updateLevel44(dt, now); return; }
   if(G.level === 43){ updateLevel43(dt, now); return; }
@@ -11240,6 +12232,36 @@ addEventListener('keydown', e=>{
   if(e.repeat) return;
   const k = e.key.toLowerCase();
   const code = { a: 'HL', d: 'HR', j: 'FL', k: 'FR' }[k];
+  if(G.level === 50){
+    if(code){ e.preventDefault(); l50Press(code); }
+    if(k === 'a') l50Hand('L', true);
+    if(k === 'd') l50Hand('R', true);
+    if(k === 'r' && L50.done) startGame(50);
+    return;
+  }
+  if(G.level === 49){
+    if(k === 'a'){ e.preventDefault(); l49Pull('L'); }
+    else if(k === 'd'){ e.preventDefault(); l49Pull('R'); }
+    else if(k === 'r' && L49.done) startGame(49);
+    return;
+  }
+  if(G.level === 48){
+    if(code){ e.preventDefault(); l48Press(code); }
+    else if(k === 'r' && L48.done) startGame(48);
+    return;
+  }
+  if(G.level === 47){
+    if(code){ e.preventDefault(); l47Press(code); }
+    else if(k === 'r' && L47.done) startGame(47);
+    return;
+  }
+  if(G.level === 46){
+    if(k === 'a' || k === 'd'){
+      e.preventDefault();
+      l46Tug(k === 'a' ? 'L' : 'R');
+    } else if(k === 'r' && L46.done) startGame(46);
+    return;
+  }
   if(G.level === 45){
     if(k === 'a'){ e.preventDefault(); l45Hand('L', true); }
     else if(k === 'd'){ e.preventDefault(); l45Hand('R', true); }
@@ -11540,6 +12562,11 @@ addEventListener('keydown', e=>{
 addEventListener('keyup', e=>{
   const k = e.key.toLowerCase();
   const code = { a: 'HL', d: 'HR', j: 'FL', k: 'FR' }[k];
+  if(G.level === 50){
+    if(k === 'a') l50Hand('L', false);
+    else if(k === 'd') l50Hand('R', false);
+    return;
+  }
   if(G.level === 45){
     if(k === 'a') l45Hand('L', false);
     else if(k === 'd') l45Hand('R', false);
@@ -11625,7 +12652,15 @@ for(const [id, side] of [['btnL', 'L'], ['btnR', 'R']]){
   const node = document.getElementById(id);
   node.addEventListener('pointerdown', e=>{
     e.preventDefault();
-    if(G.level === 45) l45Hand(side, true);
+    if(G.level === 50){
+      l50Press(side === 'L' ? 'HL' : 'HR');
+      l50Hand(side, true);
+    }
+    else if(G.level === 49) l49Pull(side);
+    else if(G.level === 48) l48Press(side === 'L' ? 'HL' : 'HR');
+    else if(G.level === 47) l47Press(side === 'L' ? 'HL' : 'HR');
+    else if(G.level === 46) l46Tug(side);
+    else if(G.level === 45) l45Hand(side, true);
     else if(G.level === 43) l43Press(side === 'L' ? 'HL' : 'HR');
     else if(G.level === 42){ if(side === 'L') l42Hand(true); }
     else if(G.level === 40) l40Press(side === 'L' ? 'HL' : 'HR');
@@ -11656,7 +12691,8 @@ for(const [id, side] of [['btnL', 'L'], ['btnR', 'R']]){
     else if(G.level === 1) pressFoot(side);
   }, { passive: false });   // 只监听 pointer 事件，避免触摸时重复触发
   node.addEventListener('pointerup', ()=>{
-    if(G.level === 45) l45Hand(side, false);
+    if(G.level === 50) l50Hand(side, false);
+    else if(G.level === 45) l45Hand(side, false);
     else if(G.level === 42){ if(side === 'L') l42Hand(false); }
     else if(G.level === 35) l35Hand(side, false);
     else if(G.level === 34) l34Up(side === 'L' ? 'HL' : 'HR');
@@ -11672,7 +12708,8 @@ for(const [id, side] of [['btnL', 'L'], ['btnR', 'R']]){
     else if(G.level === 2) l2PadUp(side);
   });
   node.addEventListener('pointercancel', ()=>{
-    if(G.level === 45) l45Hand(side, false);
+    if(G.level === 50) l50Hand(side, false);
+    else if(G.level === 45) l45Hand(side, false);
     else if(G.level === 42){ if(side === 'L') l42Hand(false); }
     else if(G.level === 35) l35Hand(side, false);
     else if(G.level === 34) l34Up(side === 'L' ? 'HL' : 'HR');
@@ -11695,7 +12732,10 @@ for(const [id, side] of [['footL', 'L'], ['footR', 'R']]){
   const node = document.getElementById(id);
   node.addEventListener('pointerdown', e=>{
     e.preventDefault();
-    if(G.level === 45) l45Foot(side, true);
+    if(G.level === 50) l50Press(side === 'L' ? 'FL' : 'FR');
+    else if(G.level === 48) l48Press(side === 'L' ? 'FL' : 'FR');
+    else if(G.level === 47) l47Press(side === 'L' ? 'FL' : 'FR');
+    else if(G.level === 45) l45Foot(side, true);
     else if(G.level === 44) l44Press(side);
     else if(G.level === 43) l43Press(side === 'L' ? 'FL' : 'FR');
     else if(G.level === 42) l42Step(side);
@@ -11842,18 +12882,28 @@ el.lv42.addEventListener('click', ()=>startGame(42));
 el.lv43.addEventListener('click', ()=>startGame(43));
 el.lv44.addEventListener('click', ()=>startGame(44));
 el.lv45.addEventListener('click', ()=>startGame(45));
+el.lv46.addEventListener('click', ()=>startGame(46));
+el.lv47.addEventListener('click', ()=>startGame(47));
+el.lv48.addEventListener('click', ()=>startGame(48));
+el.lv49.addEventListener('click', ()=>startGame(49));
+el.lv50.addEventListener('click', ()=>startGame(50));
 el.ovBtn.addEventListener('click', ()=>startGame(G.level || 1));
 el.ovHomeBtn.addEventListener('click', ()=>showHome());
 el.homeChip.addEventListener('click', ()=>showHome());
 
 function startGame(level){
   if(!G.ready) return;      // 素材还没加载完
-  const lv = Math.max(1, Math.min(45, Math.round(level || 1)));
+  const lv = Math.max(1, Math.min(50, Math.round(level || 1)));
   G.level = lv;
   G.screen = 'game';
   el.overlay.classList.remove('show');
   document.body.classList.add('ingame');
-  if(lv === 45) startLevel45();
+  if(lv === 50) startLevel50();
+  else if(lv === 49) startLevel49();
+  else if(lv === 48) startLevel48();
+  else if(lv === 47) startLevel47();
+  else if(lv === 46) startLevel46();
+  else if(lv === 45) startLevel45();
   else if(lv === 44) startLevel44();
   else if(lv === 43) startLevel43();
   else if(lv === 42) startLevel42();

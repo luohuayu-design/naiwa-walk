@@ -563,6 +563,38 @@
   body.level43 #footL,body.level45 #footL{left:calc(18px + env(safe-area-inset-left))}
   body.level43 #footR,body.level45 #footR{right:calc(18px + env(safe-area-inset-right))}
 
+  /* ---------- 第四十六 ~ 五十关 ---------- */
+  body.level46 #hud2,body.level47 #hud2,body.level48 #hud2,
+  body.level49 #hud2,body.level50 #hud2{display:block}
+  body.level46 .top,body.level46 #hint,
+  body.level47 .top,body.level47 #hint,
+  body.level48 .top,body.level48 #hint,
+  body.level49 .top,body.level49 #hint,
+  body.level50 .top,body.level50 #hint{display:none}
+
+  /* 46 / 49：只用双手 */
+  body.level46 .pad.foot,body.level49 .pad.foot{display:none}
+  body.level46 .pad,body.level49 .pad{display:flex;
+    width:clamp(76px,15vmin,112px);height:clamp(76px,15vmin,112px);
+    font-size:clamp(15px,3.6vmin,22px)}
+  body.level46 #btnL,body.level49 #btnL{left:calc(18px + env(safe-area-inset-left))}
+  body.level46 #btnR,body.level49 #btnR{right:calc(18px + env(safe-area-inset-right))}
+
+  /* 47 / 48 / 50：四个按钮 */
+  body.level47 .pad.foot,body.level48 .pad.foot,body.level50 .pad.foot{display:flex}
+  body.level47 .pad,body.level48 .pad,body.level50 .pad{
+    width:clamp(66px,13vmin,96px);height:clamp(66px,13vmin,96px);
+    font-size:clamp(13px,3vmin,18px)}
+  body.level47 #btnL,body.level48 #btnL,body.level50 #btnL{
+    left:calc(18px + env(safe-area-inset-left));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level47 #btnR,body.level48 #btnR,body.level50 #btnR{
+    right:calc(18px + env(safe-area-inset-right));
+    bottom:calc(18px + clamp(66px,13vmin,96px) + 16px + env(safe-area-inset-bottom))}
+  body.level47 #footL,body.level48 #footL,body.level50 #footL{left:calc(18px + env(safe-area-inset-left))}
+  body.level47 #footR,body.level48 #footR,body.level50 #footR{right:calc(18px + env(safe-area-inset-right))}
+  body.level47 #l5Seq,body.level48 #l5Seq,body.level50 #l5Seq{display:flex}
+
   /* 第七关：蓄力条里的绿区 */
   #l7Zone{position:absolute;top:0;bottom:0;left:0;width:0;display:none;
     background:rgba(61,220,132,.55);box-shadow:0 0 10px rgba(61,220,132,.85)}
@@ -703,7 +735,7 @@
   <!-- 关卡列表 -->
   <div class="panel" id="panelLevels" hidden>
     <h1>选择关卡</h1>
-    <div class="sub">目前开放 45 关</div>
+    <div class="sub">目前开放 50 关</div>
     <div class="lvlist">
       <div class="lv" id="lv1">
         <div class="lvno">第一关</div>
@@ -1062,6 +1094,46 @@
         <div class="lvmeta">
           <div class="lvname">奶蛙接力赛</div>
           <div class="lvdesc">四棒接力：双手按住、交替走、交替拍手、双脚齐跳</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv46">
+        <div class="lvno">第四十六关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙放风筝</div>
+          <div class="lvdesc">左右手交替拽线，把风筝留在半空绿带里累计 8 秒</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv47">
+        <div class="lvno">第四十七关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙打地鼠</div>
+          <div class="lvdesc">谁冒头就按对应部位，12 只地鼠越来越快</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv48">
+        <div class="lvno">第四十八关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙爬树摘苹果</div>
+          <div class="lvdesc">按提示交替用四个部位往上爬 12 格，摘到树顶的苹果</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv49">
+        <div class="lvno">第四十九关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙拔河</div>
+          <div class="lvdesc">左右手交替拉绳，别松劲，把小旗拉过界</div>
+        </div>
+        <div class="lvgo">开始</div>
+      </div>
+      <div class="lv" id="lv50">
+        <div class="lvno">第五十关</div>
+        <div class="lvmeta">
+          <div class="lvname">奶蛙毕业大考</div>
+          <div class="lvdesc">24 个限时指令全考一遍，最后双手按住，礼花毕业</div>
         </div>
         <div class="lvgo">开始</div>
       </div>
